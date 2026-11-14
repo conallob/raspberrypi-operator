@@ -47,6 +47,60 @@ func (m BootMode) String() string {
 	return fmt.Sprintf("%#x", uint8(m))
 }
 
+var modeNames = map[string]BootMode{
+	"sd":      ModeSD,
+	"network": ModeNetwork,
+	"rpiboot": ModeRPIBoot,
+	"usb":     ModeUSBMSD,
+	"bcm-usb": ModeBCMUSBMSD,
+	"nvme":    ModeNVMe,
+	"http":    ModeHTTP,
+	"stop":    ModeStop,
+	"restart": ModeRestart,
+}
+
+// Name returns the lower-case name used in the BootloaderPolicy API.
+func (m BootMode) Name() string {
+	for n, v := range modeNames {
+		if v == m {
+			return n
+		}
+	}
+	return fmt.Sprintf("%#x", uint8(m))
+}
+
+// BootOrderFromNames builds a BootOrder from API names, in the order the
+// bootloader should try them. Unknown names, repeats and lists longer than the
+// eight digits BOOT_ORDER can hold are rejected.
+func BootOrderFromNames(names []string) (BootOrder, error) {
+	if len(names) == 0 || len(names) > 8 {
+		return nil, fmt.Errorf("bootOrder needs 1 to 8 entries, got %d", len(names))
+	}
+	seen := map[BootMode]bool{}
+	o := make(BootOrder, 0, len(names))
+	for _, n := range names {
+		m, ok := modeNames[n]
+		if !ok {
+			return nil, fmt.Errorf("unknown boot source %q", n)
+		}
+		if seen[m] {
+			return nil, fmt.Errorf("boot source %q is listed twice", n)
+		}
+		seen[m] = true
+		o = append(o, m)
+	}
+	return o, nil
+}
+
+// Names returns the API names in the order they are tried.
+func (o BootOrder) Names() []string {
+	out := make([]string, len(o))
+	for i, m := range o {
+		out[i] = m.Name()
+	}
+	return out
+}
+
 // bootable reports whether the mode can load an OS.
 func (m BootMode) bootable() bool {
 	switch m {

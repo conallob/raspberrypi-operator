@@ -1,6 +1,9 @@
 package eeprom
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseBootOrder(t *testing.T) {
 	o, err := ParseBootOrder("0xF416")
@@ -54,6 +57,37 @@ func TestBootOrderValidate(t *testing.T) {
 		}
 		if err := o.Validate(c.current); (err != nil) != c.wantErr {
 			t.Errorf("%s: Validate(%s) err=%v wantErr=%v", c.name, c.order, err, c.wantErr)
+		}
+	}
+}
+
+func TestBootOrderFromNames(t *testing.T) {
+	o, err := BootOrderFromNames([]string{"nvme", "usb", "sd", "restart"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Digits are read right to left, so the first thing tried is the lowest
+	// digit: NVMe(6) USB(4) SD(1) restart(f) is written 0xf146.
+	if got := o.Canonical(); got != "0xf146" {
+		t.Errorf("Canonical = %s, want 0xf146", got)
+	}
+	if got := strings.Join(o.Names(), ","); got != "nvme,usb,sd,restart" {
+		t.Errorf("Names = %s", got)
+	}
+	// And the other direction, so docs that quote hex stay honest.
+	hex, _ := ParseBootOrder("0xf461")
+	if got := strings.Join(hex.Names(), ","); got != "sd,nvme,usb,restart" {
+		t.Errorf("0xf461 is %s", got)
+	}
+	for _, bad := range [][]string{nil, {}, {"floppy"}, {"sd", "sd"}, {"sd", "usb", "nvme", "http", "network", "rpiboot", "bcm-usb", "stop", "restart"}} {
+		if _, err := BootOrderFromNames(bad); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	// Every name round-trips.
+	for n, m := range modeNames {
+		if m.Name() != n {
+			t.Errorf("%s -> %s", n, m.Name())
 		}
 	}
 }

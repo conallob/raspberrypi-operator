@@ -125,13 +125,23 @@ func (h *harness) reconcile() rpiv1.NodeBootloader {
 	return h.get()
 }
 
-func target(chip rpiv1.Chip, order string) rpiv1.TargetSpec {
+// bo builds a boot order from API names.
+func bo(names ...string) []rpiv1.BootSource {
+	out := make([]rpiv1.BootSource, len(names))
+	for i, n := range names {
+		out[i] = rpiv1.BootSource(n)
+	}
+	return out
+}
+
+func target(chip rpiv1.Chip, order []rpiv1.BootSource) rpiv1.TargetSpec {
+	on := true
 	return rpiv1.TargetSpec{
 		Firmware: rpiv1.FirmwareSpec{
 			Images: []rpiv1.ImageSource{{Chip: chip, URL: "https://example.invalid/pieeprom.bin", SHA256: strings.Repeat("a", 64),
 				BuildTimestamp: node.SelfUpdateMinBuild + 2000}},
 		},
-		Config: rpiv1.BootloaderConfig{BootOrder: order, Settings: map[string]string{"POWER_OFF_ON_HALT": "1"}},
+		Config: rpiv1.BootloaderConfig{BootOrder: order, PowerOffOnHalt: &on},
 	}
 }
 
@@ -145,7 +155,7 @@ func staged(h *harness) bool {
 func TestFullUpdateBothChips(t *testing.T) {
 	for _, chip := range []rpiv1.Chip{rpiv1.ChipBCM2711, rpiv1.ChipBCM2712} {
 		t.Run(string(chip), func(t *testing.T) {
-			tg := target(chip, "0xf461")
+			tg := target(chip, bo("sd", "nvme", "usb", "restart"))
 			h := newHarness(t, chip, tg)
 			hash := tg.Hash()
 
@@ -153,7 +163,7 @@ func TestFullUpdateBothChips(t *testing.T) {
 			if nb.Status.Phase != rpiv1.PhasePending || staged(h) {
 				t.Fatalf("unapproved: phase=%s staged=%v", nb.Status.Phase, staged(h))
 			}
-			if nb.Status.Chip != chip || nb.Status.BootOrder != "0xf41" || h.fetch.calls != 0 {
+			if nb.Status.Chip != chip || nb.Status.BootOrder != "sd,usb,restart" || h.fetch.calls != 0 {
 				t.Fatalf("status not populated / downloaded early: %+v calls=%d", nb.Status, h.fetch.calls)
 			}
 
@@ -210,7 +220,7 @@ func TestFullUpdateBothChips(t *testing.T) {
 }
 
 func TestConfigOnlyChange(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2712, "0xf416")
+	tg := target(rpiv1.ChipBCM2712, bo("nvme", "sd", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2712, tg)
 	h.info.BuildTimestamp = tg.Firmware.Images[0].BuildTimestamp // firmware already current
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = tg.Hash() })
@@ -220,7 +230,7 @@ func TestConfigOnlyChange(t *testing.T) {
 }
 
 func TestUpToDate(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2711, "0xf41")
+	tg := target(rpiv1.ChipBCM2711, bo("sd", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2711, tg)
 	h.info.BuildTimestamp = tg.Firmware.Images[0].BuildTimestamp
 	h.info.Config = "BOOT_ORDER=0xF41\nPOWER_OFF_ON_HALT=1\n"
@@ -232,18 +242,20 @@ func TestUpToDate(t *testing.T) {
 func TestBlocked(t *testing.T) {
 	cases := []struct {
 		name   string
-		order  string
+		order  []rpiv1.BootSource
 		mutate func(*node.Info, *rpiv1.TargetSpec)
 		want   string
 	}{
-		{"order drops the boot device", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceNVMe }, "cannot boot from the current boot device"},
-		{"boot device unknown", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceUnknown }, "cannot tell which device"},
-		{"downgrade", "0xf41", func(i *node.Info, t *rpiv1.TargetSpec) { i.BuildTimestamp = t.Firmware.Images[0].BuildTimestamp + 1 }, "older than the running build"},
-		{"bootloader too old", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BuildTimestamp = 1 }, "too old for self-update"},
-		{"config unreadable", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.ConfigErr = node.ErrConfigUnavailable }, "blconfig"},
-		{"no image for chip", "0xf41", func(_ *node.Info, t *rpiv1.TargetSpec) { t.Firmware.Images[0].Chip = rpiv1.ChipBCM2712 }, "no firmware image"},
-		{"conditional conflict", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.Config = "[pi4]\nBOOT_ORDER=0x1\n" }, "conditional"},
-		{"BOOT_ORDER in settings", "0xf41", func(_ *node.Info, t *rpiv1.TargetSpec) { t.Config.Settings["BOOT_ORDER"] = "0x1" }, "config.bootOrder"},
+		{"order drops the boot device", bo("sd", "usb", "restart"), func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceNVMe }, "cannot boot from the current boot device"},
+		{"boot device unknown", bo("sd", "usb", "restart"), func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceUnknown }, "cannot tell which device"},
+		{"downgrade", bo("sd", "usb", "restart"), func(i *node.Info, t *rpiv1.TargetSpec) { i.BuildTimestamp = t.Firmware.Images[0].BuildTimestamp + 1 }, "older than the running build"},
+		{"bootloader too old", bo("sd", "usb", "restart"), func(i *node.Info, _ *rpiv1.TargetSpec) { i.BuildTimestamp = 1 }, "too old for self-update"},
+		{"config unreadable", bo("sd", "usb", "restart"), func(i *node.Info, _ *rpiv1.TargetSpec) { i.ConfigErr = node.ErrConfigUnavailable }, "blconfig"},
+		{"no image for chip", bo("sd", "usb", "restart"), func(_ *node.Info, t *rpiv1.TargetSpec) { t.Firmware.Images[0].Chip = rpiv1.ChipBCM2712 }, "no firmware image"},
+		{"conditional conflict", bo("sd", "usb", "restart"), func(i *node.Info, _ *rpiv1.TargetSpec) { i.Config = "[pi4]\nBOOT_ORDER=0x1\n" }, "conditional"},
+		{"BOOT_ORDER in settings", bo("sd", "usb", "restart"), func(_ *node.Info, t *rpiv1.TargetSpec) {
+			t.Config.Settings = map[string]rpiv1.SettingValue{"BOOT_ORDER": "0x1"}
+		}, "config.bootOrder"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -267,7 +279,7 @@ func TestBlocked(t *testing.T) {
 }
 
 func TestUnsafeBootOrderOverride(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2712, "0xf41") // no NVMe, yet the node boots from NVMe
+	tg := target(rpiv1.ChipBCM2712, bo("sd", "usb", "restart")) // no NVMe, yet the node boots from NVMe
 	tg.Safety.AllowUnsafeBootOrder = true
 	h := newHarness(t, rpiv1.ChipBCM2712, tg)
 	h.info.BootDevice = rpiv1.BootDeviceNVMe
@@ -278,7 +290,7 @@ func TestUnsafeBootOrderOverride(t *testing.T) {
 }
 
 func TestFailedAfterRebootIsSticky(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2712, "0xf461")
+	tg := target(rpiv1.ChipBCM2712, bo("sd", "nvme", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2712, tg)
 	hash := tg.Hash()
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = hash; nb.Spec.RebootHash = hash })
@@ -300,7 +312,7 @@ func TestFailedAfterRebootIsSticky(t *testing.T) {
 		t.Fatalf("not sticky: phase=%s reboots=%d staged=%v", nb.Status.Phase, h.reboot.n, staged(h))
 	}
 	// A changed target clears the failure.
-	tg2 := target(rpiv1.ChipBCM2712, "0xf416")
+	tg2 := target(rpiv1.ChipBCM2712, bo("nvme", "sd", "usb", "restart"))
 	h.update(func(nb *rpiv1.NodeBootloader) {
 		nb.Spec.Target = tg2
 		nb.Spec.ApprovedHash = ""
@@ -312,7 +324,7 @@ func TestFailedAfterRebootIsSticky(t *testing.T) {
 }
 
 func TestRebootNeedsMatchingHash(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2711, "0xf41")
+	tg := target(rpiv1.ChipBCM2711, bo("sd", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2711, tg)
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = tg.Hash(); nb.Spec.RebootHash = "stale" })
 	if nb := h.reconcile(); nb.Status.Phase != rpiv1.PhaseStaged || h.reboot.n != 0 {
@@ -321,14 +333,14 @@ func TestRebootNeedsMatchingHash(t *testing.T) {
 }
 
 func TestTargetChangeUnstages(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2712, "0xf461")
+	tg := target(rpiv1.ChipBCM2712, bo("sd", "nvme", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2712, tg)
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = tg.Hash() })
 	h.reconcile()
 	if !staged(h) {
 		t.Fatal("expected staged")
 	}
-	tg2 := target(rpiv1.ChipBCM2712, "0xf416")
+	tg2 := target(rpiv1.ChipBCM2712, bo("nvme", "sd", "usb", "restart"))
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.Target = tg2 }) // approval is now stale
 	nb := h.reconcile()
 	if staged(h) || nb.Status.Phase != rpiv1.PhasePending || nb.Status.StagedHash != "" {
@@ -337,7 +349,7 @@ func TestTargetChangeUnstages(t *testing.T) {
 }
 
 func TestDownloadFailureBlocks(t *testing.T) {
-	tg := target(rpiv1.ChipBCM2711, "0xf41")
+	tg := target(rpiv1.ChipBCM2711, bo("sd", "usb", "restart"))
 	h := newHarness(t, rpiv1.ChipBCM2711, tg)
 	h.fetch.err = errors.New("sha256 mismatch")
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = tg.Hash(); nb.Spec.RebootHash = tg.Hash() })
@@ -348,7 +360,7 @@ func TestDownloadFailureBlocks(t *testing.T) {
 }
 
 func TestIgnoresOtherNodes(t *testing.T) {
-	h := newHarness(t, rpiv1.ChipBCM2711, target(rpiv1.ChipBCM2711, "0xf41"))
+	h := newHarness(t, rpiv1.ChipBCM2711, target(rpiv1.ChipBCM2711, bo("sd", "usb", "restart")))
 	if _, err := h.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "other"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -369,6 +381,52 @@ func TestMixedChipsShareOneTarget(t *testing.T) {
 		h.info.BuildTimestamp = c.ts
 		if nb := h.reconcile(); nb.Status.Phase != rpiv1.PhaseUpToDate {
 			t.Errorf("%s at its own build: phase=%s msg=%s", c.chip, nb.Status.Phase, nb.Status.Message)
+		}
+	}
+}
+
+func TestTypedSettingsBecomeBootloaderKeys(t *testing.T) {
+	yes, no := true, false
+	tg := target(rpiv1.ChipBCM2712, bo("nvme", "usb", "sd", "restart"))
+	tg.Config.BootUART = &no
+	tg.Config.WakeOnGPIO = &yes
+	tg.Config.Settings = map[string]rpiv1.SettingValue{"SD_BOOT_MAX_RETRIES": "3"}
+	got, err := desiredSettings(&tg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"BOOT_ORDER": "0xf146", "BOOT_UART": "0", "WAKE_ON_GPIO": "1",
+		"POWER_OFF_ON_HALT": "1", "SD_BOOT_MAX_RETRIES": "3",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestSettingsConflictsAreRefused(t *testing.T) {
+	yes := true
+	for name, mutate := range map[string]func(*rpiv1.TargetSpec){
+		"typed and untyped": func(tg *rpiv1.TargetSpec) {
+			tg.Config.Settings = map[string]rpiv1.SettingValue{"POWER_OFF_ON_HALT": "0"}
+		},
+		"BOOT_ORDER": func(tg *rpiv1.TargetSpec) { tg.Config.Settings = map[string]rpiv1.SettingValue{"BOOT_ORDER": "0x1"} },
+		"self-update": func(tg *rpiv1.TargetSpec) {
+			tg.Config.Settings = map[string]rpiv1.SettingValue{"ENABLE_SELF_UPDATE": "0"}
+		},
+		"unknown boot source": func(tg *rpiv1.TargetSpec) { tg.Config.BootOrder = bo("floppy") },
+		"repeated source":     func(tg *rpiv1.TargetSpec) { tg.Config.BootOrder = bo("sd", "sd") },
+	} {
+		tg := target(rpiv1.ChipBCM2711, bo("sd", "restart"))
+		tg.Config.PowerOffOnHalt = &yes
+		mutate(&tg)
+		if _, err := desiredSettings(&tg); err == nil {
+			t.Errorf("%s: accepted", name)
 		}
 	}
 }

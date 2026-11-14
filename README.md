@@ -31,8 +31,9 @@ spec:
       - {chip: bcm2711, buildTimestamp: 1793402435, url: "https://…/pieeprom-2026-10-30.bin", sha256: "…"}
       - {chip: bcm2712, buildTimestamp: 1793393754, url: "https://…/pieeprom-2026-10-30.bin", sha256: "…"}
   config:
-    bootOrder: "0xf461"               # NVMe, USB, SD, then restart
-    settings: {POWER_OFF_ON_HALT: "1"}
+    bootOrder: [nvme, usb, sd, restart]   # tried first to last
+    powerOffOnHalt: true                  # typed switch for a common key
+    settings: {SD_BOOT_MAX_RETRIES: "3"}  # anything else, validated
   rollout: {maxUnavailable: 1}
 ```
 
@@ -71,6 +72,30 @@ the policy invalidates them. A node that the operator cordoned is returned to
 service when it succeeds, or when the policy is deleted; a node cordoned by
 someone else is never uncordoned.
 
+## A strictly typed API
+
+Mistakes are caught when you apply the manifest, not when a node fails to boot:
+
+- **`bootOrder` is a list of named sources** (`sd`, `usb`, `bcm-usb`, `nvme`,
+  `network`, `http`, `rpiboot`, `stop`, `restart`), not a hex string, so the
+  digit-order mix-ups of `BOOT_ORDER=0x…` can't happen. The operator writes the
+  hex.
+- **Typed switches** (`bootUART`, `wakeOnGPIO`, `powerOffOnHalt`,
+  `netInstallAtPowerOn`) are real booleans. `settings` takes any other key, but
+  rejects bad names (`^[A-Z][A-Z0-9_]*$`), values that aren't printable ASCII,
+  duplicates of a typed field, `BOOT_ORDER`, and `ENABLE_SELF_UPDATE` (the update
+  mechanism depends on it).
+- **CEL rules in the CRD** reject repeated or unknown boot sources, an order with
+  nothing bootable, and a **downgrade on edit** unless `safety.allowDowngrade`
+  is set. Unknown fields are caught too: `kubectl apply` rejects a typo such as
+  `bootOrdr`, where a bare API server would silently drop it.
+- **An admission policy** (`config/policy/`) stops an agent writing any node's
+  status but its own.
+
+The agent re-checks all of this, since it can't assume the CRD schema installed
+in the cluster is current. These rules are tested offline against the generated
+CRD using the API server's own validation code (`api/v1alpha1/crd_test.go`).
+
 ## Install
 
 ```bash
@@ -79,6 +104,10 @@ kubectl label node <name> rpi.conall.dev/managed=true
 kubectl apply -f config/samples/bootloaderpolicy.yaml   # pinned to the 2026-10-30 release
 kubectl get bootloaderpolicy,nodebootloader
 ```
+
+The admission policy needs `admissionregistration.k8s.io/v1`
+ValidatingAdmissionPolicy (Kubernetes 1.30+) and a token that carries the node
+name; see the comments in `config/policy/agent-own-node.yaml`.
 
 The agent mounts the host's `/boot/firmware`. Distros that mount it elsewhere
 (or not at all) need the hostPath in `config/agent/daemonset.yaml` adjusted.

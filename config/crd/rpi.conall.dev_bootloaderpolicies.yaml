@@ -71,20 +71,90 @@ spec:
                 properties:
                   bootOrder:
                     description: |-
-                      BootOrder is the BOOT_ORDER value, e.g. 0xf416 (NVMe, USB, SD, then
-                      restart). Read right to left, one hex digit per boot mode. The agent
-                      refuses an order that cannot boot from the device the node is currently
-                      running from, unless safety.allowUnsafeBootOrder is set.
-                    pattern: ^0[xX][0-9a-fA-F]{1,8}$
-                    type: string
+                      BootOrder lists what the bootloader tries, first to last, e.g.
+                      [nvme, usb, sd, restart]. It becomes BOOT_ORDER (the same list written as
+                      hex digits, last-tried first). Include restart (or stop) last, or a node
+                      with nothing bootable shows a diagnostic screen. The agent refuses an
+                      order that cannot boot from the device the node is currently running
+                      from, unless safety.allowUnsafeBootOrder is set.
+                    items:
+                      description: |-
+                        BootSource is one thing the bootloader can try to boot from, or a control
+                        step in the boot order.
+                      enum:
+                      - sd
+                      - network
+                      - rpiboot
+                      - usb
+                      - bcm-usb
+                      - nvme
+                      - http
+                      - stop
+                      - restart
+                      type: string
+                    maxItems: 8
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: atomic
+                    x-kubernetes-validations:
+                    - message: a boot source may be listed only once
+                      rule: self.all(s, self.exists_one(t, t == s))
+                    - message: bootOrder must include at least one bootable source
+                      rule: self.exists(s, s in ['sd', 'network', 'usb', 'bcm-usb',
+                        'nvme', 'http'])
+                  bootUART:
+                    description: BootUART enables the bootloader's UART console (BOOT_UART).
+                    type: boolean
+                  netInstallAtPowerOn:
+                    description: |-
+                      NetInstallAtPowerOn enables network install at power on
+                      (NET_INSTALL_AT_POWER_ON).
+                    type: boolean
+                  powerOffOnHalt:
+                    description: |-
+                      PowerOffOnHalt powers the board off, not just halts it, on shutdown
+                      (POWER_OFF_ON_HALT).
+                    type: boolean
                   settings:
                     additionalProperties:
+                      description: |-
+                        SettingValue is the value of a bootloader setting: printable ASCII, so no
+                        line breaks can smuggle in extra settings.
+                      pattern: ^[ -~]{0,64}$
                       type: string
                     description: |-
-                      Settings are additional bootloader keys, e.g. POWER_OFF_ON_HALT: "1".
-                      BOOT_ORDER must be set with bootOrder, not here.
+                      Settings are any other bootloader keys, e.g. SD_BOOT_MAX_RETRIES: "3".
+                      Keys named by a typed field above, BOOT_ORDER, and ENABLE_SELF_UPDATE
+                      (which the update mechanism depends on) are rejected.
+                    maxProperties: 32
                     type: object
+                    x-kubernetes-validations:
+                    - message: setting names are upper-case letters, digits and underscores
+                      rule: self.all(k, k.matches('^[A-Z][A-Z0-9_]*$'))
+                    - message: set BOOT_ORDER with bootOrder, not in settings
+                      rule: '!(''BOOT_ORDER'' in self)'
+                    - message: 'ENABLE_SELF_UPDATE cannot be managed: the update mechanism
+                        depends on it'
+                      rule: '!(''ENABLE_SELF_UPDATE'' in self)'
+                  wakeOnGPIO:
+                    description: WakeOnGPIO lets a GPIO wake a halted board (WAKE_ON_GPIO).
+                    type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: BOOT_UART is set both as bootUART and in settings
+                  rule: '!has(self.settings) || !(has(self.bootUART) && ''BOOT_UART''
+                    in self.settings)'
+                - message: WAKE_ON_GPIO is set both as wakeOnGPIO and in settings
+                  rule: '!has(self.settings) || !(has(self.wakeOnGPIO) && ''WAKE_ON_GPIO''
+                    in self.settings)'
+                - message: POWER_OFF_ON_HALT is set both as powerOffOnHalt and in
+                    settings
+                  rule: '!has(self.settings) || !(has(self.powerOffOnHalt) && ''POWER_OFF_ON_HALT''
+                    in self.settings)'
+                - message: NET_INSTALL_AT_POWER_ON is set both as netInstallAtPowerOn
+                    and in settings
+                  rule: '!has(self.settings) || !(has(self.netInstallAtPowerOn) &&
+                    ''NET_INSTALL_AT_POWER_ON'' in self.settings)'
               firmware:
                 description: FirmwareSpec declares the bootloader build that nodes
                   should run.
@@ -135,6 +205,7 @@ spec:
                       - sha256
                       - url
                       type: object
+                    maxItems: 2
                     minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
@@ -245,6 +316,12 @@ spec:
             required:
             - firmware
             type: object
+            x-kubernetes-validations:
+            - message: this would downgrade a bootloader image; set safety.allowDowngrade
+                to permit
+              rule: (has(self.safety) && self.safety.allowDowngrade) || self.firmware.images.all(i,
+                oldSelf.firmware.images.all(o, o.chip != i.chip || i.buildTimestamp
+                >= o.buildTimestamp))
           status:
             description: BootloaderPolicyStatus summarises the rollout.
             properties:
