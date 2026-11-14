@@ -133,7 +133,8 @@ make cover          # tests with coverage -> coverage.out
 RPI_EEPROM_REPO=/path/to/rpi-eeprom go test ./internal/eeprom -run RealImages -v
 ```
 
-Requires Go 1.27.
+Requires Go 1.27. Releases are cut with GoReleaser; see
+[docs/releasing.md](docs/releasing.md).
 
 Coverage is reported to [Codecov](https://codecov.io/gh/conallob/raspberrypi-operator)
 from CI. The upload needs the repository enabled there and a `CODECOV_TOKEN`

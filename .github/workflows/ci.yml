@@ -35,3 +35,17 @@ jobs:
       # toolchain instead.
       - name: Lint
         run: make lint
+
+  # Everything a release does except publish it, so a broken release config or
+  # manifest is found on a PR rather than when a tag is pushed.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make release-check
+      - run: make release-snapshot

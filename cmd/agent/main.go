@@ -5,6 +5,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -23,6 +24,7 @@ import (
 	rpiv1 "github.com/conallob/raspberrypi-operator/api/v1alpha1"
 	"github.com/conallob/raspberrypi-operator/internal/agent"
 	"github.com/conallob/raspberrypi-operator/internal/node"
+	"github.com/conallob/raspberrypi-operator/internal/version"
 )
 
 func main() {
@@ -34,7 +36,12 @@ func main() {
 	flag.DurationVar(&interval, "interval", 30*time.Second, "how often to re-probe the node")
 	zopts := zap.Options{}
 	zopts.BindFlags(flag.CommandLine)
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("raspberrypi-operator agent " + version.String())
+		return
+	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zopts)))
 	log := ctrl.Log.WithName("setup")
 
@@ -79,7 +86,7 @@ func main() {
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
-	log.Info("starting agent", "node", nodeName, "bootfs", bootfs)
+	log.Info("starting agent", "node", nodeName, "bootfs", bootfs, "version", version.Version, "commit", version.Commit)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "agent exited")
 		os.Exit(1)

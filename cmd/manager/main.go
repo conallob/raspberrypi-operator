@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	rpiv1 "github.com/conallob/raspberrypi-operator/api/v1alpha1"
 	"github.com/conallob/raspberrypi-operator/internal/controller"
+	"github.com/conallob/raspberrypi-operator/internal/version"
 )
 
 func main() {
@@ -26,7 +28,12 @@ func main() {
 	flag.BoolVar(&leaderElect, "leader-elect", true, "enable leader election")
 	zopts := zap.Options{}
 	zopts.BindFlags(flag.CommandLine)
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("raspberrypi-operator manager " + version.String())
+		return
+	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zopts)))
 	log := ctrl.Log.WithName("setup")
 
@@ -64,7 +71,7 @@ func main() {
 	utilruntime.Must(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	utilruntime.Must(mgr.AddReadyzCheck("readyz", healthz.Ping))
 
-	log.Info("starting manager")
+	log.Info("starting manager", "version", version.Version, "commit", version.Commit)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "manager exited")
 		os.Exit(1)
