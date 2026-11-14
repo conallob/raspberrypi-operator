@@ -121,7 +121,11 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 	if err != nil {
 		return r.block(nb, "%v", err)
 	}
-	fwDrift := info.BuildTimestamp != target.Firmware.BuildTimestamp
+	img, ok := target.Firmware.ImageFor(info.Chip)
+	if !ok {
+		return r.block(nb, "the policy has no firmware image for %s", info.Chip)
+	}
+	fwDrift := info.BuildTimestamp != img.BuildTimestamp
 	cfgDrift := false
 	if len(desired) > 0 {
 		if info.ConfigErr != nil {
@@ -145,7 +149,7 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 		st.FailedHash = hash
 		st.Phase = rpiv1.PhaseFailed
 		st.Message = fmt.Sprintf("rebooted but still differs from target (running build %d, want %d; config satisfied: %t); not retrying",
-			info.BuildTimestamp, target.Firmware.BuildTimestamp, !cfgDrift)
+			info.BuildTimestamp, img.BuildTimestamp, !cfgDrift)
 		return nil
 	}
 	if st.FailedHash == hash {
@@ -154,8 +158,7 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 	}
 	st.FailedHash = ""
 
-	img, reason := preflight(target, info, r.BootFS)
-	if reason != "" {
+	if reason := preflight(target, img, info, r.BootFS); reason != "" {
 		if st.StagedHash != "" {
 			_ = node.Unstage(r.BootFS)
 			st.StagedHash = ""
@@ -214,39 +217,37 @@ func desiredSettings(t *rpiv1.TargetSpec) (map[string]string, error) {
 }
 
 // preflight runs every check that can be done without writing anything. It
-// returns the image to use for this node's SoC, or a reason to refuse.
-func preflight(t *rpiv1.TargetSpec, info node.Info, bootfs string) (rpiv1.ImageSource, string) {
-	img, ok := t.Firmware.ImageFor(info.Chip)
-	if !ok {
-		return img, fmt.Sprintf("the policy has no firmware image for %s", info.Chip)
-	}
+// returns a reason to refuse, or "" if the update may proceed.
+func preflight(t *rpiv1.TargetSpec, img rpiv1.ImageSource, info node.Info, bootfs string) string {
 	if r := node.SelfUpdateBlocked(info, bootfs); r != "" {
-		return img, r
+		return r
 	}
-	if info.BuildTimestamp > t.Firmware.BuildTimestamp && !t.Safety.AllowDowngrade {
-		return img, fmt.Sprintf("target build %d is older than the running build %d; set safety.allowDowngrade to permit",
-			t.Firmware.BuildTimestamp, info.BuildTimestamp)
+	if info.BuildTimestamp > img.BuildTimestamp && !t.Safety.AllowDowngrade {
+		return fmt.Sprintf("target build %d is older than the running build %d; set safety.allowDowngrade to permit",
+			img.BuildTimestamp, info.BuildTimestamp)
 	}
-	if t.Config.BootOrder != "" && !t.Safety.AllowUnsafeBootOrder {
-		o, err := eeprom.ParseBootOrder(t.Config.BootOrder)
-		if err != nil {
-			return img, err.Error()
-		}
-		modes := node.ModesFor(info.BootDevice)
-		if modes == nil {
-			return img, fmt.Sprintf("cannot tell which device this node boots from (%s), so BOOT_ORDER cannot be checked; set safety.allowUnsafeBootOrder to override", info.BootDevice)
-		}
-		if err := o.Validate(modes); err != nil {
-			return img, err.Error()
-		}
-	} else if t.Config.BootOrder != "" {
-		if o, err := eeprom.ParseBootOrder(t.Config.BootOrder); err != nil {
-			return img, err.Error()
-		} else if err := o.Validate(nil); err != nil {
-			return img, err.Error()
-		}
+	if t.Config.BootOrder == "" {
+		return ""
 	}
-	return img, ""
+	o, err := eeprom.ParseBootOrder(t.Config.BootOrder)
+	if err != nil {
+		return err.Error()
+	}
+	if t.Safety.AllowUnsafeBootOrder {
+		// Still refuse an order that cannot boot anything at all.
+		if err := o.Validate(nil); err != nil {
+			return err.Error()
+		}
+		return ""
+	}
+	modes := node.ModesFor(info.BootDevice)
+	if modes == nil {
+		return fmt.Sprintf("cannot tell which device this node boots from (%s), so BOOT_ORDER cannot be checked; set safety.allowUnsafeBootOrder to override", info.BootDevice)
+	}
+	if err := o.Validate(modes); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // stage downloads the image, edits its config to merge the node's current

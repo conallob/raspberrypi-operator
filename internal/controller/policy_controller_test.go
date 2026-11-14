@@ -71,9 +71,9 @@ func policy() *rpiv1.BootloaderPolicy {
 		Spec: rpiv1.BootloaderPolicySpec{
 			NodeSelector: metav1.LabelSelector{MatchLabels: map[string]string{"hw": "pi"}},
 			TargetSpec: rpiv1.TargetSpec{
-				Firmware: rpiv1.FirmwareSpec{BuildTimestamp: 1_750_000_000, Images: []rpiv1.ImageSource{
-					{Chip: rpiv1.ChipBCM2711, URL: "https://example.invalid/a", SHA256: strings.Repeat("a", 64)},
-					{Chip: rpiv1.ChipBCM2712, URL: "https://example.invalid/b", SHA256: strings.Repeat("b", 64)},
+				Firmware: rpiv1.FirmwareSpec{Images: []rpiv1.ImageSource{
+					{Chip: rpiv1.ChipBCM2711, URL: "https://example.invalid/a", SHA256: strings.Repeat("a", 64), BuildTimestamp: 1_750_000_000},
+					{Chip: rpiv1.ChipBCM2712, URL: "https://example.invalid/b", SHA256: strings.Repeat("b", 64), BuildTimestamp: 1_750_000_100},
 				}},
 				Config: rpiv1.BootloaderConfig{BootOrder: "0xf416"},
 			},

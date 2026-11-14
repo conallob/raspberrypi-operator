@@ -65,7 +65,13 @@ Pure function over node snapshots, covered by unit tests:
   `bootconf.txt` replacement in `rpi-eeprom-config`
   ([source](https://github.com/raspberrypi/rpi-eeprom)). Images are 512 KiB
   (BCM2711) or 2 MiB (BCM2712). Edited images are re-parsed and the config
-  round-tripped before anything is written.
+  round-tripped before anything is written. `TestRealImages` runs the editor on
+  every `default`/`latest` image in an `rpi-eeprom` checkout (~30 at the time of
+  writing): each parses, rewriting a config with itself is byte-identical, and a
+  real edit changes only a ~20–30 byte window inside the writable region.
+- **Build timestamps are per chip.** The two SoCs build one release at different
+  times (2026-10-30: `1793402435` for BCM2711, `1793393754` for BCM2712), so
+  `buildTimestamp` lives on each image. `versions.txt` in `rpi-eeprom` lists them.
 - **Running config** is read from the `blconfig` nvmem device
   (`/sys/firmware/devicetree/base/aliases/blconfig` → `/sys/bus/nvmem/devices/*`),
   the same source `rpi-eeprom-update` prefers over `vcgencmd`.
@@ -92,10 +98,13 @@ Pure function over node snapshots, covered by unit tests:
 
 ## Limitations
 
-- **Not tested on hardware.** In particular unverified: the image editor against
-  real `pieeprom` files (tests use synthetic images built to the same layout),
-  the exact boot-mode digit set for `BOOT_ORDER`, the nvmem lookup on real
-  kernels, and CM4 eMMC boot behaviour.
+- **Not tested on hardware.** The image editor is checked against real upstream
+  images, but not that a bootloader accepts and applies what it writes. Also
+  unverified: the exact boot-mode digit set for `BOOT_ORDER`, the nvmem lookup on
+  real kernels, and CM4 eMMC boot behaviour.
+- `versions.txt` also records a manufacturing version (`mfg_ver`) per image;
+  `rpi-eeprom-update` treats lowering it specially (it needs
+  `bootloader_allow_mfg_downgrade=1`). The operator does not model this yet.
 - Bootloaders older than build `1650968668` need a one-off manual update.
 - If `/boot/firmware` isn't a mount of the device the Pi boots from (some
   distros, netboot), staged files won't be seen by the bootloader. The agent

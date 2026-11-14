@@ -31,18 +31,21 @@ type ImageSource struct {
 	// image that does not match, so pin it.
 	// +kubebuilder:validation:Pattern=`^[a-f0-9]{64}$`
 	SHA256 string `json:"sha256"`
+
+	// BuildTimestamp is the Unix time of this image's bootloader build, as the
+	// running bootloader reports it in
+	// /proc/device-tree/chosen/bootloader/build-timestamp (also "timestamp" in
+	// `vcgencmd bootloader_version`). The two SoC families build the same
+	// release at different times, so it is set per image. rpi-eeprom lists it
+	// as build_epoch in firmware-2711/versions.txt and firmware-2712/versions.txt.
+	// The agent uses it to decide whether a node already runs this image and to
+	// verify the update after reboot.
+	// +kubebuilder:validation:Minimum=1
+	BuildTimestamp int64 `json:"buildTimestamp"`
 }
 
 // FirmwareSpec declares the bootloader build that nodes should run.
 type FirmwareSpec struct {
-	// BuildTimestamp is the Unix time of the bootloader build, as the running
-	// bootloader reports it in /proc/device-tree/chosen/bootloader/build-timestamp
-	// (also "timestamp" in `vcgencmd bootloader_version`). It is how the agent
-	// decides whether a node already runs this firmware, and how it verifies the
-	// update after reboot.
-	// +kubebuilder:validation:Minimum=1
-	BuildTimestamp int64 `json:"buildTimestamp"`
-
 	// Images holds one image per SoC family present in the selected nodes.
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map

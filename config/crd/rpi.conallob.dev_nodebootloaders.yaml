@@ -112,16 +112,6 @@ spec:
                     description: FirmwareSpec declares the bootloader build that nodes
                       should run.
                     properties:
-                      buildTimestamp:
-                        description: |-
-                          BuildTimestamp is the Unix time of the bootloader build, as the running
-                          bootloader reports it in /proc/device-tree/chosen/bootloader/build-timestamp
-                          (also "timestamp" in `vcgencmd bootloader_version`). It is how the agent
-                          decides whether a node already runs this firmware, and how it verifies the
-                          update after reboot.
-                        format: int64
-                        minimum: 1
-                        type: integer
                       images:
                         description: Images holds one image per SoC family present
                           in the selected nodes.
@@ -130,6 +120,19 @@ spec:
                             ImageSource locates one EEPROM image (a pieeprom-*.bin file from
                             https://github.com/raspberrypi/rpi-eeprom) for one SoC family.
                           properties:
+                            buildTimestamp:
+                              description: |-
+                                BuildTimestamp is the Unix time of this image's bootloader build, as the
+                                running bootloader reports it in
+                                /proc/device-tree/chosen/bootloader/build-timestamp (also "timestamp" in
+                                `vcgencmd bootloader_version`). The two SoC families build the same
+                                release at different times, so it is set per image. rpi-eeprom lists it
+                                as build_epoch in firmware-2711/versions.txt and firmware-2712/versions.txt.
+                                The agent uses it to decide whether a node already runs this image and to
+                                verify the update after reboot.
+                              format: int64
+                              minimum: 1
+                              type: integer
                             chip:
                               description: |-
                                 Chip is the SoC family of a Raspberry Pi. It selects which EEPROM image a
@@ -150,6 +153,7 @@ spec:
                               pattern: ^https://.+
                               type: string
                           required:
+                          - buildTimestamp
                           - chip
                           - sha256
                           - url
@@ -160,7 +164,6 @@ spec:
                         - chip
                         x-kubernetes-list-type: map
                     required:
-                    - buildTimestamp
                     - images
                     type: object
                   safety:

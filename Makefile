@@ -32,12 +32,12 @@ test:
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 go build -o bin/manager ./cmd/manager
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/agent-arm64 ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/manager ./cmd/manager
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/agent ./cmd/agent
 
 .PHONY: docker-build
 docker-build:
-	docker buildx build --platform linux/arm64,linux/amd64 -t $(IMG) .
+	docker buildx build --platform linux/arm64 -t $(IMG) .
 
 .PHONY: install
 install: ## Install CRDs, controller and agent into the current cluster.

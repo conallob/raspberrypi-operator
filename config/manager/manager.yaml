@@ -21,6 +21,8 @@ spec:
         app.kubernetes.io/component: manager
     spec:
       serviceAccountName: raspberrypi-operator-manager
+      nodeSelector:
+        kubernetes.io/arch: arm64
       securityContext:
         runAsNonRoot: true
         seccompProfile:

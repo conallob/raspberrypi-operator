@@ -128,8 +128,8 @@ func (h *harness) reconcile() rpiv1.NodeBootloader {
 func target(chip rpiv1.Chip, order string) rpiv1.TargetSpec {
 	return rpiv1.TargetSpec{
 		Firmware: rpiv1.FirmwareSpec{
-			BuildTimestamp: node.SelfUpdateMinBuild + 2000,
-			Images:         []rpiv1.ImageSource{{Chip: chip, URL: "https://example.invalid/pieeprom.bin", SHA256: strings.Repeat("a", 64)}},
+			Images: []rpiv1.ImageSource{{Chip: chip, URL: "https://example.invalid/pieeprom.bin", SHA256: strings.Repeat("a", 64),
+				BuildTimestamp: node.SelfUpdateMinBuild + 2000}},
 		},
 		Config: rpiv1.BootloaderConfig{BootOrder: order, Settings: map[string]string{"POWER_OFF_ON_HALT": "1"}},
 	}
@@ -196,7 +196,7 @@ func TestFullUpdateBothChips(t *testing.T) {
 
 			// The node comes back with the new bootloader and config.
 			h.info.BootID = "boot-2"
-			h.info.BuildTimestamp = tg.Firmware.BuildTimestamp
+			h.info.BuildTimestamp = tg.Firmware.Images[0].BuildTimestamp
 			h.info.Config = conf
 			nb = h.reconcile()
 			if nb.Status.Phase != rpiv1.PhaseUpToDate || staged(h) || nb.Status.RebootingFromBootID != "" {
@@ -212,7 +212,7 @@ func TestFullUpdateBothChips(t *testing.T) {
 func TestConfigOnlyChange(t *testing.T) {
 	tg := target(rpiv1.ChipBCM2712, "0xf416")
 	h := newHarness(t, rpiv1.ChipBCM2712, tg)
-	h.info.BuildTimestamp = tg.Firmware.BuildTimestamp // firmware already current
+	h.info.BuildTimestamp = tg.Firmware.Images[0].BuildTimestamp // firmware already current
 	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.ApprovedHash = tg.Hash() })
 	if nb := h.reconcile(); nb.Status.Phase != rpiv1.PhaseStaged {
 		t.Fatalf("config drift alone must stage an update: %s %s", nb.Status.Phase, nb.Status.Message)
@@ -222,7 +222,7 @@ func TestConfigOnlyChange(t *testing.T) {
 func TestUpToDate(t *testing.T) {
 	tg := target(rpiv1.ChipBCM2711, "0xf41")
 	h := newHarness(t, rpiv1.ChipBCM2711, tg)
-	h.info.BuildTimestamp = tg.Firmware.BuildTimestamp
+	h.info.BuildTimestamp = tg.Firmware.Images[0].BuildTimestamp
 	h.info.Config = "BOOT_ORDER=0xF41\nPOWER_OFF_ON_HALT=1\n"
 	if nb := h.reconcile(); nb.Status.Phase != rpiv1.PhaseUpToDate {
 		t.Fatalf("phase = %s (%s)", nb.Status.Phase, nb.Status.Message)
@@ -238,7 +238,7 @@ func TestBlocked(t *testing.T) {
 	}{
 		{"order drops the boot device", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceNVMe }, "cannot boot from the current boot device"},
 		{"boot device unknown", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BootDevice = rpiv1.BootDeviceUnknown }, "cannot tell which device"},
-		{"downgrade", "0xf41", func(i *node.Info, t *rpiv1.TargetSpec) { i.BuildTimestamp = t.Firmware.BuildTimestamp + 1 }, "older than the running build"},
+		{"downgrade", "0xf41", func(i *node.Info, t *rpiv1.TargetSpec) { i.BuildTimestamp = t.Firmware.Images[0].BuildTimestamp + 1 }, "older than the running build"},
 		{"bootloader too old", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.BuildTimestamp = 1 }, "too old for self-update"},
 		{"config unreadable", "0xf41", func(i *node.Info, _ *rpiv1.TargetSpec) { i.ConfigErr = node.ErrConfigUnavailable }, "blconfig"},
 		{"no image for chip", "0xf41", func(_ *node.Info, t *rpiv1.TargetSpec) { t.Firmware.Images[0].Chip = rpiv1.ChipBCM2712 }, "no firmware image"},
@@ -351,5 +351,24 @@ func TestIgnoresOtherNodes(t *testing.T) {
 	h := newHarness(t, rpiv1.ChipBCM2711, target(rpiv1.ChipBCM2711, "0xf41"))
 	if _, err := h.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "other"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMixedChipsShareOneTarget: the two SoC families build the same release at
+// different times, so one policy must be able to say "up to date" for both.
+func TestMixedChipsShareOneTarget(t *testing.T) {
+	tg := rpiv1.TargetSpec{Firmware: rpiv1.FirmwareSpec{Images: []rpiv1.ImageSource{
+		{Chip: rpiv1.ChipBCM2711, URL: "https://example.invalid/a", SHA256: strings.Repeat("a", 64), BuildTimestamp: 1793402435},
+		{Chip: rpiv1.ChipBCM2712, URL: "https://example.invalid/b", SHA256: strings.Repeat("b", 64), BuildTimestamp: 1793393754},
+	}}}
+	for _, c := range []struct {
+		chip rpiv1.Chip
+		ts   int64
+	}{{rpiv1.ChipBCM2711, 1793402435}, {rpiv1.ChipBCM2712, 1793393754}} {
+		h := newHarness(t, c.chip, tg)
+		h.info.BuildTimestamp = c.ts
+		if nb := h.reconcile(); nb.Status.Phase != rpiv1.PhaseUpToDate {
+			t.Errorf("%s at its own build: phase=%s msg=%s", c.chip, nb.Status.Phase, nb.Status.Message)
+		}
 	}
 }
