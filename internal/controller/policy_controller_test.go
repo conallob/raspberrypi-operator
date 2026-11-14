@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,10 @@ import (
 	rpiv1 "github.com/conallob/raspberrypi-operator/api/v1alpha1"
 )
 
-type fakeDrainer struct{ log []string }
+type fakeDrainer struct {
+	log       []string
+	failDrain bool
+}
 
 func (f *fakeDrainer) Cordon(_ context.Context, n string) error {
 	f.log = append(f.log, "cordon:"+n)
@@ -31,6 +35,9 @@ func (f *fakeDrainer) Uncordon(_ context.Context, n string) error {
 }
 func (f *fakeDrainer) Drain(_ context.Context, n string, _ time.Duration) error {
 	f.log = append(f.log, "drain:"+n)
+	if f.failDrain {
+		return errors.New("cannot evict: PodDisruptionBudget")
+	}
 	return nil
 }
 
@@ -46,6 +53,7 @@ type env struct {
 	c   client.Client
 	r   *PolicyReconciler
 	d   *fakeDrainer
+	rec *record.FakeRecorder
 	now time.Time
 }
 
@@ -60,8 +68,8 @@ func setup(t *testing.T, pol *rpiv1.BootloaderPolicy, nodes ...*corev1.Node) *en
 		b = b.WithObjects(n)
 	}
 	c := b.Build()
-	e := &env{t: t, c: c, d: &fakeDrainer{}, now: time.Unix(1_800_000_000, 0)}
-	e.r = &PolicyReconciler{Client: c, Scheme: sch, Drainer: e.d, Recorder: record.NewFakeRecorder(100), Now: func() time.Time { return e.now }}
+	e := &env{t: t, c: c, d: &fakeDrainer{}, rec: record.NewFakeRecorder(100), now: time.Unix(1_800_000_000, 0)}
+	e.r = &PolicyReconciler{Client: c, Scheme: sch, Drainer: e.d, Recorder: e.rec, Now: func() time.Time { return e.now }}
 	return e
 }
 

@@ -91,3 +91,21 @@ func TestBootOrderFromNames(t *testing.T) {
 		}
 	}
 }
+
+func TestBootModeNamesAndReach(t *testing.T) {
+	if got := BootMode(0x9).Name(); got != "0x9" {
+		t.Errorf("unknown mode name = %q", got)
+	}
+	if ModeNVMe.String() != "NVMe" || ModeUSBMSD.String() != "USB-MSD" || BootMode(0x9).String() != "0x9" {
+		t.Error("String() changed; error messages depend on it")
+	}
+	o, _ := ParseBootOrder("0xf146")
+	if !o.Reaches(ModeSD) || !o.Reaches(ModeNVMe) || o.Reaches(ModeHTTP) {
+		t.Error("Reaches wrong for a reachable and an absent mode")
+	}
+	// Anything after a stop or restart is never tried.
+	o, _ = ParseBootOrder("0x16f")
+	if o.Reaches(ModeSD) {
+		t.Error("a source listed after restart was treated as reachable")
+	}
+}

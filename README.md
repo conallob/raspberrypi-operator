@@ -1,5 +1,8 @@
 # raspberrypi-operator
 
+[![CI](https://github.com/conallob/raspberrypi-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/conallob/raspberrypi-operator/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/conallob/raspberrypi-operator/graph/badge.svg)](https://codecov.io/gh/conallob/raspberrypi-operator)
+
 A Kubernetes operator that manages the bootloader EEPROM of Raspberry Pi
 nodes: **firmware updates** and **bootloader configuration** (starting with
 `BOOT_ORDER`), declared in a manifest and rolled out one node at a time.
@@ -125,8 +128,15 @@ it differs per chip even for the same release date, so it's set per image.
 
 ```bash
 make test lint generate manifests
+make cover          # tests with coverage -> coverage.out
 # also run against genuine upstream images:
 RPI_EEPROM_REPO=/path/to/rpi-eeprom go test ./internal/eeprom -run RealImages -v
 ```
 
 Requires Go 1.27.
+
+Coverage is reported to [Codecov](https://codecov.io/gh/conallob/raspberrypi-operator)
+from CI. The upload needs the repository enabled there and a `CODECOV_TOKEN`
+Actions secret; until then the step warns and the build still passes. Thin
+`main()` wiring, generated code and the single `reboot(2)` call are excluded
+(see `codecov.yml`), and patches are expected to cover at least 80% of new lines.

@@ -430,3 +430,7 @@ func TestSettingsConflictsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+func reqFor(name string) ctrl.Request {
+	return ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}
+}

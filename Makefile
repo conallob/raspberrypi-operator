@@ -28,7 +28,12 @@ lint: ## Built with the module's Go version: prebuilt releases lag behind it.
 
 .PHONY: test
 test:
-	go test -race -cover ./...
+	go test -race ./...
+
+.PHONY: cover
+cover: ## Run tests with coverage; writes coverage.out. -coverpkg counts a package's coverage from every test, not just its own.
+	go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
 
 .PHONY: build
 build:
