@@ -1,0 +1,35 @@
+name: Release
+
+# Push a tag like v0.1.0 to cut a release. This workflow publishes the GitHub
+# release (arm64 binaries, install.yaml, checksums); the Image workflow builds
+# and pushes the matching container image from the same tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release and upload its assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changelog needs history and tags
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test before releasing
+        run: make test
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.20.2 # keep in step with GORELEASER in the Makefile
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

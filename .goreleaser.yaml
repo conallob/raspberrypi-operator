@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# https://goreleaser.com/customization/
+version: 2
+
+project_name: raspberrypi-operator
+
+before:
+  hooks:
+    # Install manifests with the image pinned to this release rather than
+    # :latest. Attached to the release as install.yaml. Rendered outside dist/, which
+    # goreleaser empties after before-hooks have run.
+    - ./hack/release-manifests.sh {{ .Version }} .release/install.yaml
+
+# Raspberry Pis are arm64, so that is all there is to build. The container
+# image is built and pushed by .github/workflows/image.yml on the same tag.
+builds:
+  - id: manager
+    binary: manager
+    main: ./cmd/manager
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    # These three variables are what `manager -version` and the startup log
+    # report (internal/version). The Makefile and Dockerfile set the same ones.
+    ldflags:
+      - -s -w
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Version={{ .Version }}
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Commit={{ .Commit }}
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Date={{ .Date }}
+  - id: agent
+    binary: agent
+    main: ./cmd/agent
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Version={{ .Version }}
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Commit={{ .Commit }}
+      - -X github.com/conallob/raspberrypi-operator/internal/version.Date={{ .Date }}
+
+archives:
+  - id: operator
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - docs/*
+      - config/**/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  extra_files:
+    - glob: .release/install.yaml
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs?:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: conallob
+    name: raspberrypi-operator
+  # v1.2.3-rc.1 is marked a pre-release.
+  prerelease: auto
+  extra_files:
+    - glob: .release/install.yaml
+  header: |
+    ## raspberrypi-operator {{ .Tag }}
+
+    > Alpha: not yet validated on real hardware. Try it on a spare node you can
+    > recover by hand first. See the limitations in `docs/design.md`.
+  footer: |
+    ## Install
+
+    ```bash
+    kubectl apply -f https://github.com/conallob/raspberrypi-operator/releases/download/{{ .Tag }}/install.yaml
+    ```
+
+    The container image is `ghcr.io/conallob/raspberrypi-operator:{{ .Version }}`
+    (arm64), published by the Image workflow for this tag; it can lag the release
+    by a few minutes. `install.yaml` pins it. Verify downloads against `checksums.txt`.

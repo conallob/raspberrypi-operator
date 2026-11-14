@@ -1,11 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Each component is its own kustomization (kustomize can't load files from a
+# sibling directory, only whole directories).
 resources:
-  - ../crd/rpi.conall.dev_bootloaderpolicies.yaml
-  - ../crd/rpi.conall.dev_nodebootloaders.yaml
-  - ../manager/manager.yaml
-  - ../rbac/service_account.yaml
-  - ../rbac/role.yaml
-  - ../rbac/bindings.yaml
-  - ../agent/daemonset.yaml
-  - ../policy/agent-own-node.yaml
+  - ../crd
+  - ../manager
+  - ../rbac
+  - ../agent
+  - ../policy
