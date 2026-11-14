@@ -1,0 +1,56 @@
+# The agent runs on every arm64 node and does nothing on a node that has no
+# NodeBootloader object (i.e. one no BootloaderPolicy selects), or that is not
+# a Raspberry Pi.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: raspberrypi-operator-agent
+  namespace: raspberrypi-operator-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: raspberrypi-operator
+      app.kubernetes.io/component: agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: raspberrypi-operator
+        app.kubernetes.io/component: agent
+    spec:
+      serviceAccountName: raspberrypi-operator-agent
+      # hostPID: reboot(2) from a container PID namespace only signals that
+      # namespace's init instead of rebooting the machine.
+      hostPID: true
+      priorityClassName: system-node-critical
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: agent
+          image: ghcr.io/conallob/raspberrypi-operator:latest
+          command: ["/agent"]
+          args: ["--boot-fs=/host/boot/firmware"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          # Privileged: needs /sys/firmware/devicetree and /sys/bus/nvmem
+          # (masked in unprivileged containers), write access to the boot
+          # partition, and CAP_SYS_BOOT.
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - {name: bootfs, mountPath: /host/boot/firmware}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: bootfs
+          hostPath:
+            path: /boot/firmware
+            type: Directory

@@ -1,0 +1,346 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: bootloaderpolicies.rpi.conallob.dev
+spec:
+  group: rpi.conallob.dev
+  names:
+    kind: BootloaderPolicy
+    listKind: BootloaderPolicyList
+    plural: bootloaderpolicies
+    shortNames:
+    - blp
+    singular: bootloaderpolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.selected
+      name: Selected
+      type: integer
+    - jsonPath: .status.upToDate
+      name: UpToDate
+      type: integer
+    - jsonPath: .status.inProgress
+      name: InProgress
+      type: integer
+    - jsonPath: .status.blocked
+      name: Blocked
+      type: integer
+    - jsonPath: .status.failed
+      name: Failed
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BootloaderPolicy declares the EEPROM firmware and bootloader configuration
+          for a set of Raspberry Pi nodes.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BootloaderPolicySpec declares the bootloader state for a
+              set of nodes.
+            properties:
+              config:
+                description: |-
+                  BootloaderConfig is the desired bootloader configuration (the bootconf.txt
+                  embedded in the EEPROM image). Only keys named here are managed; every other
+                  key in the node's current configuration is preserved.
+                properties:
+                  bootOrder:
+                    description: |-
+                      BootOrder is the BOOT_ORDER value, e.g. 0xf416 (NVMe, USB, SD, then
+                      restart). Read right to left, one hex digit per boot mode. The agent
+                      refuses an order that cannot boot from the device the node is currently
+                      running from, unless safety.allowUnsafeBootOrder is set.
+                    pattern: ^0[xX][0-9a-fA-F]{1,8}$
+                    type: string
+                  settings:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Settings are additional bootloader keys, e.g. POWER_OFF_ON_HALT: "1".
+                      BOOT_ORDER must be set with bootOrder, not here.
+                    type: object
+                type: object
+              firmware:
+                description: FirmwareSpec declares the bootloader build that nodes
+                  should run.
+                properties:
+                  buildTimestamp:
+                    description: |-
+                      BuildTimestamp is the Unix time of the bootloader build, as the running
+                      bootloader reports it in /proc/device-tree/chosen/bootloader/build-timestamp
+                      (also "timestamp" in `vcgencmd bootloader_version`). It is how the agent
+                      decides whether a node already runs this firmware, and how it verifies the
+                      update after reboot.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  images:
+                    description: Images holds one image per SoC family present in
+                      the selected nodes.
+                    items:
+                      description: |-
+                        ImageSource locates one EEPROM image (a pieeprom-*.bin file from
+                        https://github.com/raspberrypi/rpi-eeprom) for one SoC family.
+                      properties:
+                        chip:
+                          description: |-
+                            Chip is the SoC family of a Raspberry Pi. It selects which EEPROM image a
+                            node uses.
+                          enum:
+                          - bcm2711
+                          - bcm2712
+                          type: string
+                        sha256:
+                          description: |-
+                            SHA256 is the hex digest of the image. The agent refuses to stage an
+                            image that does not match, so pin it.
+                          pattern: ^[a-f0-9]{64}$
+                          type: string
+                        url:
+                          description: URL is where the node agent downloads the image
+                            from. Must be https.
+                          pattern: ^https://.+
+                          type: string
+                      required:
+                      - chip
+                      - sha256
+                      - url
+                      type: object
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - chip
+                    x-kubernetes-list-type: map
+                required:
+                - buildTimestamp
+                - images
+                type: object
+              nodeSelector:
+                description: |-
+                  NodeSelector selects the nodes this policy manages. An empty selector
+                  matches every node, which is almost never what you want: select on a
+                  label such as kubernetes.io/arch=arm64 plus your own Pi label.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              paused:
+                description: |-
+                  Paused stops new nodes from being approved. Nodes already in flight
+                  finish.
+                type: boolean
+              rollout:
+                description: RolloutSpec controls how a policy is applied across nodes.
+                properties:
+                  drainTimeoutSeconds:
+                    default: 300
+                    description: DrainTimeoutSeconds bounds how long draining one
+                      node may take.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxUnavailable:
+                    default: 1
+                    description: |-
+                      MaxUnavailable is how many nodes may be cordoned, updating or rebooting
+                      at once.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  rebootTimeoutSeconds:
+                    default: 900
+                    description: |-
+                      RebootTimeoutSeconds is how long a node may take to come back with the
+                      new bootloader after the reboot is authorised. When it expires the
+                      rollout halts and the node stays cordoned.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              safety:
+                description: Safety relaxes the agent's pre-flight checks. Both default
+                  to false.
+                properties:
+                  allowDowngrade:
+                    description: |-
+                      AllowDowngrade permits installing a bootloader older than the one that
+                      is running.
+                    type: boolean
+                  allowUnsafeBootOrder:
+                    description: |-
+                      AllowUnsafeBootOrder permits a BOOT_ORDER that cannot boot from the
+                      device the node is running from, or whose current boot device cannot be
+                      determined. A wrong value can leave a node unbootable until it is
+                      recovered by hand.
+                    type: boolean
+                type: object
+            required:
+            - firmware
+            type: object
+          status:
+            description: BootloaderPolicyStatus summarises the rollout.
+            properties:
+              blocked:
+                description: Blocked nodes failed a pre-flight check; see their NodeBootloader.
+                format: int32
+                type: integer
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              failed:
+                description: Failed nodes were updated but did not come back as expected.
+                format: int32
+                type: integer
+              inProgress:
+                description: InProgress nodes are cordoned, staged or rebooting.
+                format: int32
+                type: integer
+              observedGeneration:
+                format: int64
+                type: integer
+              pending:
+                description: Pending nodes need an update and are waiting for a slot.
+                format: int32
+                type: integer
+              selected:
+                description: Selected is the number of nodes the policy matches.
+                format: int32
+                type: integer
+              upToDate:
+                description: UpToDate nodes already match the target.
+                format: int32
+                type: integer
+            required:
+            - blocked
+            - failed
+            - inProgress
+            - pending
+            - selected
+            - upToDate
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,32 @@
+# Example: keep every Raspberry Pi 4/CM4 and Pi 5/CM5 node on a pinned
+# bootloader and prefer NVMe, then USB, then SD.
+#
+# Fill in buildTimestamp, url and sha256 from the images you have chosen in
+# https://github.com/raspberrypi/rpi-eeprom (firmware-2711/ and firmware-2712/).
+# The sha256 is of the pieeprom-*.bin file; buildTimestamp is what
+# `vcgencmd bootloader_version` prints as "timestamp" for that release.
+apiVersion: rpi.conallob.dev/v1alpha1
+kind: BootloaderPolicy
+metadata:
+  name: pis
+spec:
+  nodeSelector:
+    matchLabels:
+      rpi.conallob.dev/managed: "true"
+  firmware:
+    buildTimestamp: 0 # TODO: replace
+    images:
+      - chip: bcm2711 # Pi 4, Pi 400, CM4
+        url: https://raw.githubusercontent.com/raspberrypi/rpi-eeprom/<tag>/firmware-2711/stable/pieeprom-<date>.bin
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+      - chip: bcm2712 # Pi 5, Pi 500, CM5
+        url: https://raw.githubusercontent.com/raspberrypi/rpi-eeprom/<tag>/firmware-2712/stable/pieeprom-<date>.bin
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  config:
+    bootOrder: "0xf461" # tried right to left: NVMe, USB, SD; then restart
+    settings:
+      POWER_OFF_ON_HALT: "1"
+  rollout:
+    maxUnavailable: 1
+    drainTimeoutSeconds: 300
+    rebootTimeoutSeconds: 900
