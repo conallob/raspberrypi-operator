@@ -11,10 +11,12 @@ subjects:
     name: raspberrypi-operator-manager
     namespace: raspberrypi-operator-system
 ---
-# The agent only reads NodeBootloaders and writes their status.
-# NOTE: RBAC cannot restrict an agent to its own node's object, so a
-# compromised node could report false status for another node. See
-# docs/design.md.
+# The agent reads NodeBootloaders, writes their status, and creates its own
+# node's (empty, Unmanaged) object when it starts. It reads its Node to own the
+# object it creates.
+# NOTE: RBAC cannot restrict an agent to its own node's object, so the admission
+# policy in config/policy does: a compromised node could otherwise create or
+# report on another node's object. See docs/design.md.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -22,10 +24,13 @@ metadata:
 rules:
   - apiGroups: ["rpi.conall.dev"]
     resources: ["nodebootloaders"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create"]
   - apiGroups: ["rpi.conall.dev"]
     resources: ["nodebootloaders/status"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

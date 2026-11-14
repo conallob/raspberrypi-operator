@@ -246,4 +246,11 @@ func TestDeletionUncordonsOnlyWhatWeCordoned(t *testing.T) {
 	if got := strings.Join(e.d.log, ","); !strings.HasSuffix(got, "uncordon:pi-a") || strings.Contains(got, "uncordon:pi-b") {
 		t.Fatalf("log = %s", got)
 	}
+	// Both nodes stay visible, back to Unmanaged with every approval withdrawn.
+	for _, n := range []string{"pi-a", "pi-b"} {
+		nb := e.nb(n)
+		if nb.Spec.PolicyName != "" || nb.Spec.Target != nil || nb.Spec.ApprovedHash != "" {
+			t.Errorf("%s was not returned to Unmanaged: %+v", n, nb.Spec)
+		}
+	}
 }

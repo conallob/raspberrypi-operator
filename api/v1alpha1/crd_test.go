@@ -257,3 +257,53 @@ func TestDowngradeIsRefusedOnUpdate(t *testing.T) {
 		t.Errorf("upgrade rejected: %v", p)
 	}
 }
+
+func nodeBootloader(spec, status map[string]any) map[string]any {
+	o := map[string]any{
+		"apiVersion": "rpi.conall.dev/v1alpha1", "kind": "NodeBootloader",
+		"metadata": map[string]any{"name": "pi-1"},
+		"spec":     spec,
+	}
+	if status != nil {
+		o["status"] = status
+	}
+	return o
+}
+
+// The NodeBootloader an agent creates is empty; a managed one carries a copy of
+// the policy's target. The CRD must accept both and every phase, and still
+// refuse a half-formed target.
+func TestNodeBootloaderCRD(t *testing.T) {
+	c := loadCRD(t, "rpi.conall.dev_nodebootloaders.yaml")
+	pol := sample(t)["spec"].(map[string]any)
+	target := map[string]any{"firmware": pol["firmware"], "config": pol["config"]}
+
+	for name, o := range map[string]map[string]any{
+		"empty, as the agent creates it": nodeBootloader(map[string]any{}, nil),
+		"managed":                        nodeBootloader(map[string]any{"policyName": "pis", "target": target}, nil),
+		"approved":                       nodeBootloader(map[string]any{"policyName": "pis", "target": target, "approvedHash": "abc"}, nil),
+	} {
+		if p := c.check(o, nil); len(p) > 0 {
+			t.Errorf("%s rejected: %v", name, p)
+		}
+	}
+	for _, ph := range allPhases {
+		if p := c.check(nodeBootloader(map[string]any{}, map[string]any{"phase": string(ph)}), nil); len(p) > 0 {
+			t.Errorf("phase %s rejected: %v", ph, p)
+		}
+	}
+	for name, tc := range map[string]struct {
+		o    map[string]any
+		want string
+	}{
+		"unknown phase":           {nodeBootloader(map[string]any{}, map[string]any{"phase": "Sleeping"}), "phase"},
+		"target with no firmware": {nodeBootloader(map[string]any{"target": map[string]any{}}, nil), "firmware"},
+		"typo in spec":            {nodeBootloader(map[string]any{"polcyName": "pis"}, nil), "unknown field"},
+		"typo in status":          {nodeBootloader(map[string]any{}, map[string]any{"phse": "Pending"}), "unknown field"},
+	} {
+		p := strings.Join(c.check(tc.o, nil), "\n")
+		if !strings.Contains(p, tc.want) {
+			t.Errorf("%s: want a problem about %q, got %q", name, tc.want, p)
+		}
+	}
+}

@@ -43,8 +43,11 @@ spec:
       openAPIV3Schema:
         description: |-
           NodeBootloader is the per-node working object shared by the controller and
-          the node agent. Its name is the node name. The controller owns spec and the
-          agent owns status; users normally only read it.
+          the node agent. Its name is the node name. The agent creates it when it starts
+          on a Raspberry Pi, so every Pi node is visible whether or not a policy selects
+          it. The controller owns spec (it fills it in when a policy selects the node,
+          and clears it when none does) and the agent owns status; users normally only
+          read it.
         properties:
           apiVersion:
             description: |-
@@ -72,7 +75,9 @@ spec:
                   stage. The agent stages nothing unless it equals the hash of Target.
                 type: string
               policyName:
-                description: PolicyName is the BootloaderPolicy that owns this object.
+                description: |-
+                  PolicyName is the BootloaderPolicy that manages this node. Empty while
+                  the node is unmanaged.
                 type: string
               rebootAuthorizedAt:
                 description: |-
@@ -87,7 +92,9 @@ spec:
                   what it staged.
                 type: string
               target:
-                description: Target is a copy of the owning policy's target.
+                description: |-
+                  Target is a copy of the managing policy's target. Unset while the node is
+                  unmanaged.
                 properties:
                   config:
                     description: |-
@@ -262,9 +269,6 @@ spec:
                 required:
                 - firmware
                 type: object
-            required:
-            - policyName
-            - target
             type: object
           status:
             description: NodeBootloaderStatus is written by the node agent.
@@ -306,8 +310,11 @@ spec:
                 description: Observed state of the node.
                 type: string
               phase:
-                description: Phase is where a node is in the update.
+                description: |-
+                  Phase is where a node is in the update. The allowed transitions between
+                  phases are in AllowedTransitions (phases.go) and docs/design.md.
                 enum:
+                - Unmanaged
                 - UpToDate
                 - Pending
                 - Blocked

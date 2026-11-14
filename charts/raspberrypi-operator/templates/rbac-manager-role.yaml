@@ -73,7 +73,6 @@ rules:
   - nodebootloaders
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
