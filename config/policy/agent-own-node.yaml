@@ -20,7 +20,7 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
-      - apiGroups: ["rpi.conallob.dev"]
+      - apiGroups: ["rpi.conall.dev"]
         apiVersions: ["*"]
         operations: ["UPDATE"]
         resources: ["nodebootloaders", "nodebootloaders/status"]
