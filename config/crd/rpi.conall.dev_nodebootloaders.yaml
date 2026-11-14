@@ -1,0 +1,260 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: nodebootloaders.rpi.conall.dev
+spec:
+  group: rpi.conall.dev
+  names:
+    kind: NodeBootloader
+    listKind: NodeBootloaderList
+    plural: nodebootloaders
+    shortNames:
+    - nbl
+    singular: nodebootloader
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.policyName
+      name: Policy
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.chip
+      name: Chip
+      type: string
+    - jsonPath: .status.bootDevice
+      name: Boot
+      type: string
+    - jsonPath: .status.bootOrder
+      name: Order
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodeBootloader is the per-node working object shared by the controller and
+          the node agent. Its name is the node name. The controller owns spec and the
+          agent owns status; users normally only read it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodeBootloaderSpec is written by the controller.
+            properties:
+              approvedHash:
+                description: |-
+                  ApprovedHash is the target hash the controller has cleared the agent to
+                  stage. The agent stages nothing unless it equals the hash of Target.
+                type: string
+              policyName:
+                description: PolicyName is the BootloaderPolicy that owns this object.
+                type: string
+              rebootAuthorizedAt:
+                description: |-
+                  RebootAuthorizedAt is when RebootHash was set; the reboot timeout runs
+                  from here.
+                format: date-time
+                type: string
+              rebootHash:
+                description: |-
+                  RebootHash is the target hash for which the node is drained and may
+                  reboot. The agent reboots only if it equals the hash of Target and of
+                  what it staged.
+                type: string
+              target:
+                description: Target is a copy of the owning policy's target.
+                properties:
+                  config:
+                    description: |-
+                      BootloaderConfig is the desired bootloader configuration (the bootconf.txt
+                      embedded in the EEPROM image). Only keys named here are managed; every other
+                      key in the node's current configuration is preserved.
+                    properties:
+                      bootOrder:
+                        description: |-
+                          BootOrder is the BOOT_ORDER value, e.g. 0xf416 (NVMe, USB, SD, then
+                          restart). Read right to left, one hex digit per boot mode. The agent
+                          refuses an order that cannot boot from the device the node is currently
+                          running from, unless safety.allowUnsafeBootOrder is set.
+                        pattern: ^0[xX][0-9a-fA-F]{1,8}$
+                        type: string
+                      settings:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Settings are additional bootloader keys, e.g. POWER_OFF_ON_HALT: "1".
+                          BOOT_ORDER must be set with bootOrder, not here.
+                        type: object
+                    type: object
+                  firmware:
+                    description: FirmwareSpec declares the bootloader build that nodes
+                      should run.
+                    properties:
+                      images:
+                        description: Images holds one image per SoC family present
+                          in the selected nodes.
+                        items:
+                          description: |-
+                            ImageSource locates one EEPROM image (a pieeprom-*.bin file from
+                            https://github.com/raspberrypi/rpi-eeprom) for one SoC family.
+                          properties:
+                            buildTimestamp:
+                              description: |-
+                                BuildTimestamp is the Unix time of this image's bootloader build, as the
+                                running bootloader reports it in
+                                /proc/device-tree/chosen/bootloader/build-timestamp (also "timestamp" in
+                                `vcgencmd bootloader_version`). The two SoC families build the same
+                                release at different times, so it is set per image. rpi-eeprom lists it
+                                as build_epoch in firmware-2711/versions.txt and firmware-2712/versions.txt.
+                                The agent uses it to decide whether a node already runs this image and to
+                                verify the update after reboot.
+                              format: int64
+                              minimum: 1
+                              type: integer
+                            chip:
+                              description: |-
+                                Chip is the SoC family of a Raspberry Pi. It selects which EEPROM image a
+                                node uses.
+                              enum:
+                              - bcm2711
+                              - bcm2712
+                              type: string
+                            sha256:
+                              description: |-
+                                SHA256 is the hex digest of the image. The agent refuses to stage an
+                                image that does not match, so pin it.
+                              pattern: ^[a-f0-9]{64}$
+                              type: string
+                            url:
+                              description: URL is where the node agent downloads the
+                                image from. Must be https.
+                              pattern: ^https://.+
+                              type: string
+                          required:
+                          - buildTimestamp
+                          - chip
+                          - sha256
+                          - url
+                          type: object
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - chip
+                        x-kubernetes-list-type: map
+                    required:
+                    - images
+                    type: object
+                  safety:
+                    description: Safety relaxes the agent's pre-flight checks. Both
+                      default to false.
+                    properties:
+                      allowDowngrade:
+                        description: |-
+                          AllowDowngrade permits installing a bootloader older than the one that
+                          is running.
+                        type: boolean
+                      allowUnsafeBootOrder:
+                        description: |-
+                          AllowUnsafeBootOrder permits a BOOT_ORDER that cannot boot from the
+                          device the node is running from, or whose current boot device cannot be
+                          determined. A wrong value can leave a node unbootable until it is
+                          recovered by hand.
+                        type: boolean
+                    type: object
+                required:
+                - firmware
+                type: object
+            required:
+            - policyName
+            - target
+            type: object
+          status:
+            description: NodeBootloaderStatus is written by the node agent.
+            properties:
+              bootDevice:
+                description: BootDevice is the device the node's boot partition lives
+                  on.
+                type: string
+              bootID:
+                description: BootID is the kernel boot ID; it changes on every reboot.
+                type: string
+              bootOrder:
+                description: BootOrder is the running bootloader's BOOT_ORDER.
+                type: string
+              buildTimestamp:
+                description: BuildTimestamp is the running bootloader's build time
+                  (Unix seconds).
+                format: int64
+                type: integer
+              chip:
+                description: |-
+                  Chip is the SoC family of a Raspberry Pi. It selects which EEPROM image a
+                  node uses.
+                enum:
+                - bcm2711
+                - bcm2712
+                type: string
+              failedHash:
+                description: FailedHash is the target hash that failed; the agent
+                  will not retry it.
+                type: string
+              lastProbeTime:
+                format: date-time
+                type: string
+              message:
+                description: Message explains Blocked and Failed.
+                type: string
+              model:
+                description: Observed state of the node.
+                type: string
+              phase:
+                description: Phase is where a node is in the update.
+                enum:
+                - UpToDate
+                - Pending
+                - Blocked
+                - Staged
+                - Rebooting
+                - Failed
+                type: string
+              rebootingFromBootID:
+                description: |-
+                  RebootingFromBootID is the boot ID the agent rebooted away from. If the
+                  boot ID has changed and the node still differs, the update failed.
+                type: string
+              stagedHash:
+                description: StagedHash is the target hash whose files are on the
+                  boot partition.
+                type: string
+              targetHash:
+                description: TargetHash is the hash of the target this status was
+                  computed for.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

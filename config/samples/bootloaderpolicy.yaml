@@ -1,0 +1,38 @@
+# Example: keep every Raspberry Pi 4/CM4 and Pi 5/CM5 node on the 2026-10-30
+# "default" bootloader release and prefer NVMe, then USB, then SD.
+#
+# Images come from https://github.com/raspberrypi/rpi-eeprom, pinned to a commit
+# so the URL never changes under you; sha256 is of the pieeprom-*.bin file.
+# buildTimestamp is the image's build_epoch from that repo's
+# firmware-2711/versions.txt or firmware-2712/versions.txt. It differs per chip
+# even for the same release date.
+#
+# To move to a newer release: pick a file under firmware-27xx/default/, copy its
+# build_epoch from versions.txt, update the commit in the URL, and take the
+# sha256 of the file.
+apiVersion: rpi.conall.dev/v1alpha1
+kind: BootloaderPolicy
+metadata:
+  name: pis
+spec:
+  nodeSelector:
+    matchLabels:
+      rpi.conall.dev/managed: "true"
+  firmware:
+    images:
+      - chip: bcm2711 # Pi 4, Pi 400, CM4
+        buildTimestamp: 1793402435
+        url: https://raw.githubusercontent.com/raspberrypi/rpi-eeprom/3831e51dba65f4493f3f88c1d049de73165c082e/firmware-2711/default/pieeprom-2026-10-30.bin
+        sha256: 6abfaea480f93da47a790f89751ed45d3af6e88ee8fb337d4eb62ad125ca3e8a
+      - chip: bcm2712 # Pi 5, Pi 500, CM5
+        buildTimestamp: 1793393754
+        url: https://raw.githubusercontent.com/raspberrypi/rpi-eeprom/3831e51dba65f4493f3f88c1d049de73165c082e/firmware-2712/default/pieeprom-2026-10-30.bin
+        sha256: 251a27b235571c2f6ba0de254aff32f5fe0d6d5ed1af7429faee11d1f396c566
+  config:
+    bootOrder: "0xf461" # tried right to left: NVMe, USB, SD; then restart
+    settings:
+      POWER_OFF_ON_HALT: "1"
+  rollout:
+    maxUnavailable: 1
+    drainTimeoutSeconds: 300
+    rebootTimeoutSeconds: 900

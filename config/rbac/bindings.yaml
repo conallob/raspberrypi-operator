@@ -1,0 +1,66 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: raspberrypi-operator-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: raspberrypi-operator-manager
+subjects:
+  - kind: ServiceAccount
+    name: raspberrypi-operator-manager
+    namespace: raspberrypi-operator-system
+---
+# The agent only reads NodeBootloaders and writes their status.
+# NOTE: RBAC cannot restrict an agent to its own node's object, so a
+# compromised node could report false status for another node. See
+# docs/design.md.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: raspberrypi-operator-agent
+rules:
+  - apiGroups: ["rpi.conall.dev"]
+    resources: ["nodebootloaders"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rpi.conall.dev"]
+    resources: ["nodebootloaders/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: raspberrypi-operator-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: raspberrypi-operator-agent
+subjects:
+  - kind: ServiceAccount
+    name: raspberrypi-operator-agent
+    namespace: raspberrypi-operator-system
+---
+# Leader election.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: raspberrypi-operator-leader-election
+  namespace: raspberrypi-operator-system
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: raspberrypi-operator-leader-election
+  namespace: raspberrypi-operator-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: raspberrypi-operator-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: raspberrypi-operator-manager
+    namespace: raspberrypi-operator-system
