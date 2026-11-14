@@ -29,6 +29,8 @@ type RolloutSpec struct {
 }
 
 // BootloaderPolicySpec declares the bootloader state for a set of nodes.
+//
+// +kubebuilder:validation:XValidation:rule="(has(self.safety) && self.safety.allowDowngrade) || self.firmware.images.all(i, oldSelf.firmware.images.all(o, o.chip != i.chip || i.buildTimestamp >= o.buildTimestamp))",message="this would downgrade a bootloader image; set safety.allowDowngrade to permit"
 type BootloaderPolicySpec struct {
 	// NodeSelector selects the nodes this policy manages. An empty selector
 	// matches every node, which is almost never what you want: select on a

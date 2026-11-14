@@ -1,5 +1,5 @@
 # Example: keep every Raspberry Pi 4/CM4 and Pi 5/CM5 node on the 2026-10-30
-# "default" bootloader release and prefer NVMe, then USB, then SD.
+# "default" bootloader release, trying NVMe, then USB, then SD.
 #
 # Images come from https://github.com/raspberrypi/rpi-eeprom, pinned to a commit
 # so the URL never changes under you; sha256 is of the pieeprom-*.bin file.
@@ -29,9 +29,12 @@ spec:
         url: https://raw.githubusercontent.com/raspberrypi/rpi-eeprom/3831e51dba65f4493f3f88c1d049de73165c082e/firmware-2712/default/pieeprom-2026-10-30.bin
         sha256: 251a27b235571c2f6ba0de254aff32f5fe0d6d5ed1af7429faee11d1f396c566
   config:
-    bootOrder: "0xf461" # tried right to left: NVMe, USB, SD; then restart
-    settings:
-      POWER_OFF_ON_HALT: "1"
+    # What the bootloader tries, first to last. The agent refuses an order that
+    # can't boot from the device a node is running from right now.
+    bootOrder: [nvme, usb, sd, restart]
+    powerOffOnHalt: true # typed switches exist for the common keys...
+    settings: # ...and anything else goes here, validated by name and value
+      SD_BOOT_MAX_RETRIES: "3"
   rollout:
     maxUnavailable: 1
     drainTimeoutSeconds: 300

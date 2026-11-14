@@ -8,3 +8,4 @@ resources:
   - ../rbac/role.yaml
   - ../rbac/bindings.yaml
   - ../agent/daemonset.yaml
+  - ../policy/agent-own-node.yaml

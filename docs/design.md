@@ -24,6 +24,34 @@ controller) firmware, A/B EEPROM updates on Pi 5, resolving release channels.
 controller sets: `approvedHash` (may stage) and `rebootHash` (may reboot). Both
 must equal the hash of the current target, so a policy edit revokes them.
 
+## API validation
+
+The API is typed so that config mistakes are rejected at admission:
+
+| Mistake | Caught by |
+|---|---|
+| typo'd field (`bootOrdr`) | strict decoding (`kubectl apply`); also a test that the sample decodes strictly |
+| unknown or repeated boot source, nothing bootable | enum + CEL on `bootOrder` |
+| hex digit-order mix-ups | there is no hex: `bootOrder` is a list of names |
+| bad setting name or value, newline injection | CEL on the `settings` keys, pattern on values |
+| `BOOT_ORDER` / `ENABLE_SELF_UPDATE` in `settings`, or a key set twice | CEL on `config` |
+| duplicate chip, bad url / sha256, missing timestamp | list-map key, patterns, required fields |
+| silent downgrade | transition rule (`oldSelf`) on the policy spec |
+| agent writing another node's status | `ValidatingAdmissionPolicy` |
+
+The CRD is generated from the Go types (`controller-gen`), which stay the source
+of truth. Protobuf was considered and not adopted: a CRD's schema is OpenAPI
+whatever the source, CRDs cannot use protobuf on the wire, and generated proto
+structs don't fit controller-runtime or `controller-gen` without shims.
+
+Because CRD validation can be bypassed or lag a version skew, the agent
+re-validates everything and refuses to act on a target it considers unsafe.
+
+`api/v1alpha1/crd_test.go` loads the generated CRDs and checks them as the API
+server does (CEL compilation and cost, schema, list-map uniqueness, pruning of
+unknown fields, transition rules), and `policy_test.go` compiles the admission
+policy with the API server's CEL environment and exercises its logic.
+
 ## Update flow
 
 ```
@@ -89,10 +117,12 @@ Pure function over node snapshots, covered by unit tests:
 - The agent is privileged with `hostPID` (needed for sysfs, the boot partition
   and `reboot(2)`). It can only reboot when the controller has set a matching
   `rebootHash`.
-- RBAC can't scope an agent to its own node's `NodeBootloader`. A compromised
-  node could write another node's status (e.g. report `UpToDate`). Mitigation
-  options: a `ValidatingAdmissionPolicy` tying the status writer's node to the
-  object name.
+- RBAC can't scope an agent to its own node's `NodeBootloader`, so
+  `config/policy/agent-own-node.yaml` does: a `ValidatingAdmissionPolicy` that
+  rejects an agent's write unless the object is named after the node its token is
+  bound to, and rejects any spec change by an agent. It relies on the node name
+  the API server puts in a pod-bound token and fails closed if it's absent.
+  The policy logic is tested; that a real cluster supplies the claim is not.
 - Images must be `https://` and are pinned by SHA-256. The operator does not
   validate that an image is an *official* Raspberry Pi build.
 
@@ -120,5 +150,5 @@ Pure function over node snapshots, covered by unit tests:
 
 - Resolve `channel: stable` to a release and pin the digest in status.
 - `config.txt` management via the same approve/stage/reboot machinery.
-- Admission policy for agent status writes; kured-style reboot coordination;
-  Prometheus metrics for phase and bootloader age.
+- kured-style reboot coordination; Prometheus metrics for phase and bootloader
+  age.

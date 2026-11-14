@@ -75,7 +75,7 @@ func policy() *rpiv1.BootloaderPolicy {
 					{Chip: rpiv1.ChipBCM2711, URL: "https://example.invalid/a", SHA256: strings.Repeat("a", 64), BuildTimestamp: 1_750_000_000},
 					{Chip: rpiv1.ChipBCM2712, URL: "https://example.invalid/b", SHA256: strings.Repeat("b", 64), BuildTimestamp: 1_750_000_100},
 				}},
-				Config: rpiv1.BootloaderConfig{BootOrder: "0xf416"},
+				Config: rpiv1.BootloaderConfig{BootOrder: []rpiv1.BootSource{rpiv1.BootNVMe, rpiv1.BootSD, rpiv1.BootUSB, rpiv1.BootRestart}},
 			},
 			Rollout: rpiv1.RolloutSpec{MaxUnavailable: 1, RebootTimeoutSeconds: 600},
 		},
@@ -209,13 +209,13 @@ func TestPolicyEditPropagatesAndInvalidatesApproval(t *testing.T) {
 
 	var pol rpiv1.BootloaderPolicy
 	_ = e.c.Get(context.Background(), types.NamespacedName{Name: "pis"}, &pol)
-	pol.Spec.Config.BootOrder = "0xf461"
+	pol.Spec.Config.BootOrder = []rpiv1.BootSource{rpiv1.BootSD, rpiv1.BootNVMe, rpiv1.BootUSB, rpiv1.BootRestart}
 	if err := e.c.Update(context.Background(), &pol); err != nil {
 		t.Fatal(err)
 	}
 	e.reconcile()
 	a := e.nb("pi-a")
-	if a.Spec.Target.Hash() == oldHash || a.Spec.Target.Config.BootOrder != "0xf461" {
+	if a.Spec.Target.Hash() == oldHash || a.Spec.Target.Config.BootOrder[0] != rpiv1.BootSD {
 		t.Fatal("target not propagated")
 	}
 	if a.Spec.ApprovedHash == a.Spec.Target.Hash() {
