@@ -40,9 +40,14 @@ spec:
   rollout: {maxUnavailable: 1}
 ```
 
-1. The **controller** creates a `NodeBootloader` per selected node.
-2. The **agent** (a privileged DaemonSet) probes its node and reports whether it
-   differs from the target, running every pre-flight check.
+0. Each **agent** (a privileged DaemonSet) creates a `NodeBootloader` for its own
+   node when it starts on a supported Pi, so every Pi node is visible, as
+   `Unmanaged`, before any policy selects it. `kubectl get nodebootloaders` shows
+   the fleet: chip, running bootloader build, boot device and boot order.
+1. A **policy** that selects a node claims its `NodeBootloader`; one that stops
+   selecting it (or is deleted) returns it to `Unmanaged`.
+2. The **agent** probes its node and reports whether it differs from the target,
+   running every pre-flight check.
 3. The controller approves nodes one at a time: **cordon, stage, drain, reboot**.
    Nothing is written to a node until it is approved, and no node reboots until
    it is drained.

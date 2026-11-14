@@ -1,10 +1,12 @@
 # Ties each agent to its own node's NodeBootloader.
 #
-# RBAC can grant the agent "update nodebootloaders/status" but cannot say "only
-# the object named after your node", so without this a compromised node could
-# report any other node as UpToDate (or Failed). This policy rejects writes where
-# the object name differs from the node the agent's service account token is
-# bound to.
+# RBAC can grant the agent "create nodebootloaders" and "update
+# nodebootloaders/status" but cannot say "only the object named after your
+# node", so without this a compromised node could create or report on any other
+# node's object (say, report it UpToDate). This policy rejects writes where the
+# object name differs from the node the agent's service account token is bound
+# to; an agent may create only an empty object (no policy, target or approvals)
+# and may never change spec.
 #
 # It relies on the node name the API server records in a pod-bound service
 # account token (`authentication.kubernetes.io/node-name` in userInfo.extra),
@@ -22,7 +24,7 @@ spec:
     resourceRules:
       - apiGroups: ["rpi.conall.dev"]
         apiVersions: ["*"]
-        operations: ["UPDATE"]
+        operations: ["CREATE", "UPDATE"]
         resources: ["nodebootloaders", "nodebootloaders/status"]
   variables:
     - name: isAgent
@@ -37,8 +39,10 @@ spec:
   validations:
     - expression: "!variables.isAgent || (variables.nodeName != '' && object.metadata.name == variables.nodeName)"
       message: "an agent may only update the NodeBootloader of the node it runs on"
-    - expression: "!variables.isAgent || object.spec == oldObject.spec"
+    - expression: "!variables.isAgent || request.operation != 'UPDATE' || object.spec == oldObject.spec"
       message: "an agent may only change status, never spec"
+    - expression: "!variables.isAgent || request.operation != 'CREATE' || !has(object.spec) || (!has(object.spec.policyName) && !has(object.spec.target) && !has(object.spec.approvedHash) && !has(object.spec.rebootHash) && !has(object.spec.rebootAuthorizedAt))"
+      message: "an agent may only create an empty (Unmanaged) NodeBootloader"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

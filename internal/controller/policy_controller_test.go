@@ -21,8 +21,9 @@ import (
 )
 
 type fakeDrainer struct {
-	log       []string
-	failDrain bool
+	log          []string
+	failDrain    bool
+	failUncordon bool
 }
 
 func (f *fakeDrainer) Cordon(_ context.Context, n string) error {
@@ -31,6 +32,9 @@ func (f *fakeDrainer) Cordon(_ context.Context, n string) error {
 }
 func (f *fakeDrainer) Uncordon(_ context.Context, n string) error {
 	f.log = append(f.log, "uncordon:"+n)
+	if f.failUncordon {
+		return errors.New("api server unavailable")
+	}
 	return nil
 }
 func (f *fakeDrainer) Drain(_ context.Context, n string, _ time.Duration) error {
@@ -245,5 +249,12 @@ func TestDeletionUncordonsOnlyWhatWeCordoned(t *testing.T) {
 	e.reconcile()
 	if got := strings.Join(e.d.log, ","); !strings.HasSuffix(got, "uncordon:pi-a") || strings.Contains(got, "uncordon:pi-b") {
 		t.Fatalf("log = %s", got)
+	}
+	// Both nodes stay visible, back to Unmanaged with every approval withdrawn.
+	for _, n := range []string{"pi-a", "pi-b"} {
+		nb := e.nb(n)
+		if nb.Spec.PolicyName != "" || nb.Spec.Target != nil || nb.Spec.ApprovedHash != "" {
+			t.Errorf("%s was not returned to Unmanaged: %+v", n, nb.Spec)
+		}
 	}
 }

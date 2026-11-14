@@ -71,6 +71,7 @@ func main() {
 	prober := node.Prober{Root: "/", BootFS: bootfs}
 	r := &agent.Reconciler{
 		Client:   mgr.GetClient(),
+		Reader:   mgr.GetAPIReader(),
 		NodeName: nodeName,
 		BootFS:   bootfs,
 		Probe:    prober.Probe,

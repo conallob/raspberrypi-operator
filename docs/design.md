@@ -37,7 +37,7 @@ The API is typed so that config mistakes are rejected at admission:
 | `BOOT_ORDER` / `ENABLE_SELF_UPDATE` in `settings`, or a key set twice | CEL on `config` |
 | duplicate chip, bad url / sha256, missing timestamp | list-map key, patterns, required fields |
 | silent downgrade | transition rule (`oldSelf`) on the policy spec |
-| agent writing another node's status | `ValidatingAdmissionPolicy` |
+| agent writing another node's status, or creating another node's object | `ValidatingAdmissionPolicy` |
 
 The CRD is generated from the Go types (`controller-gen`), which stay the source
 of truth. Protobuf was considered and not adopted: a CRD's schema is OpenAPI
@@ -51,6 +51,46 @@ re-validates everything and refuses to act on a target it considers unsafe.
 server does (CEL compilation and cost, schema, list-map uniqueness, pruning of
 unknown fields, transition rules), and `policy_test.go` compiles the admission
 policy with the API server's CEL environment and exercises its logic.
+
+## Node phases
+
+Every Pi node has a `NodeBootloader`, created by its agent when it starts, so the
+fleet is visible whether or not a policy selects a node. Its `status.phase` is a
+state machine:
+
+| Phase | Meaning |
+|---|---|
+| `Unmanaged` | No policy selects the node. The agent reports what it observes (chip, running build, boot device, boot order, config) and never stages an update or reboots. It leaves any update file it did not stage itself alone. |
+| `Pending` | A policy selects the node and it differs from the target; waiting to be approved. |
+| `Blocked` | A pre-flight check refused the update; nothing was written. |
+| `Staged` | The update is on the boot partition, waiting for the node to be drained and cleared to reboot. |
+| `Rebooting` | The agent has asked the kernel to reboot. |
+| `UpToDate` | The node matches the target. |
+| `Failed` | The node rebooted but does not match. Sticky until the target changes or the node is released; never retried. |
+
+Allowed transitions (staying in a phase is always allowed). The same table is
+`AllowedTransitions` in `api/v1alpha1/phases.go`; a test keeps them identical, and
+every agent test checks the transitions it causes against it.
+
+<!-- phases:start -->
+| From | May move to |
+|---|---|
+| *(new object)* | `Unmanaged`, `Pending`, `UpToDate`, `Blocked` |
+| `Unmanaged` | `Pending`, `UpToDate`, `Blocked` |
+| `Pending` | `Unmanaged`, `UpToDate`, `Blocked`, `Staged`, `Rebooting` |
+| `Blocked` | `Unmanaged`, `Pending`, `UpToDate`, `Staged`, `Rebooting` |
+| `Staged` | `Unmanaged`, `Pending`, `UpToDate`, `Blocked`, `Rebooting` |
+| `Rebooting` | `Unmanaged`, `Pending`, `UpToDate`, `Blocked`, `Staged`, `Failed` |
+| `Failed` | `Unmanaged`, `Pending`, `UpToDate`, `Blocked` |
+| `UpToDate` | `Unmanaged`, `Pending`, `Blocked` |
+<!-- phases:end -->
+
+A policy that selects an `Unmanaged` node claims it (the controller fills in
+`spec.policyName` and `spec.target`); a policy that stops selecting it, or is
+deleted, clears the spec again, so the node returns to `Unmanaged`: it is never
+deleted just because it is not managed. The `NodeBootloader` is owned by its
+`Node`, so it goes when the node does. An agent only creates an object for a
+board it supports, so an arm64 server running the DaemonSet gets none.
 
 ## Update flow
 
@@ -120,7 +160,9 @@ Pure function over node snapshots, covered by unit tests:
 - RBAC can't scope an agent to its own node's `NodeBootloader`, so
   `config/policy/agent-own-node.yaml` does: a `ValidatingAdmissionPolicy` that
   rejects an agent's write unless the object is named after the node its token is
-  bound to, and rejects any spec change by an agent. It relies on the node name
+  bound to, rejects any spec change by an agent, and lets it create only an empty
+  (Unmanaged) object. The agent has `create` on `nodebootloaders` for that, and
+  `get` on `nodes` to own the object it creates. It relies on the node name
   the API server puts in a pod-bound token and fails closed if it's absent.
   The policy logic is tested; that a real cluster supplies the claim is not.
 - Images must be `https://` and are pinned by SHA-256. The operator does not

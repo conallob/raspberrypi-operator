@@ -56,7 +56,7 @@ type PolicyReconciler struct {
 // +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies/finalizers,verbs=update
-// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
@@ -162,11 +162,17 @@ func (r *PolicyReconciler) selectedNodes(ctx context.Context, pol *rpiv1.Bootloa
 	return list.Items, nil
 }
 
-// syncNodeObjects creates or updates a NodeBootloader per selected node and
-// removes the ones whose node is no longer selected.
+// syncNodeObjects makes a NodeBootloader per selected node carry this policy's
+// target, and lets go of the ones whose node is no longer selected.
+//
+// Every Pi node already has a NodeBootloader (the agent creates it, Unmanaged),
+// so for most nodes this adopts an existing object; it creates one only when the
+// agent has not got there yet. A node is never deleted from the cluster's view
+// because a policy lost interest in it: it goes back to Unmanaged.
 func (r *PolicyReconciler) syncNodeObjects(ctx context.Context, pol *rpiv1.BootloaderPolicy, nodes []corev1.Node) error {
 	want := map[string]bool{}
-	for _, n := range nodes {
+	for i := range nodes {
+		n := &nodes[i]
 		want[n.Name] = true
 		var nb rpiv1.NodeBootloader
 		err := r.Get(ctx, types.NamespacedName{Name: n.Name}, &nb)
@@ -174,22 +180,26 @@ func (r *PolicyReconciler) syncNodeObjects(ctx context.Context, pol *rpiv1.Bootl
 		case apierrors.IsNotFound(err):
 			nb = rpiv1.NodeBootloader{
 				ObjectMeta: metav1.ObjectMeta{Name: n.Name},
-				Spec:       rpiv1.NodeBootloaderSpec{PolicyName: pol.Name, Target: pol.Spec.TargetSpec},
+				Spec:       rpiv1.NodeBootloaderSpec{PolicyName: pol.Name, Target: pol.Spec.TargetSpec.DeepCopy()},
 			}
-			if err := controllerutil.SetControllerReference(pol, &nb, r.Scheme); err != nil {
+			if err := controllerutil.SetOwnerReference(n, &nb, r.Scheme); err != nil {
 				return err
 			}
-			if err := r.Create(ctx, &nb); err != nil {
+			// The agent may create it at the same moment; the next pass adopts it.
+			if err := r.Create(ctx, &nb); err != nil && !apierrors.IsAlreadyExists(err) {
 				return err
 			}
 		case err != nil:
 			return err
-		case nb.Spec.PolicyName != pol.Name:
+		case nb.Spec.PolicyName != "" && nb.Spec.PolicyName != pol.Name && r.policyExists(ctx, nb.Spec.PolicyName):
 			r.Recorder.Eventf(pol, corev1.EventTypeWarning, "NodeConflict",
 				"node %s is already managed by policy %s", n.Name, nb.Spec.PolicyName)
-		case !equality.Semantic.DeepEqual(nb.Spec.Target, pol.Spec.TargetSpec):
+		case nb.Spec.PolicyName != pol.Name || !equality.Semantic.DeepEqual(nb.Spec.Target, &pol.Spec.TargetSpec):
+			// Unmanaged (or left by a policy that no longer exists), or the policy
+			// changed: take it over and point it at this target.
 			orig := nb.DeepCopy()
-			nb.Spec.Target = pol.Spec.TargetSpec
+			nb.Spec.PolicyName = pol.Name
+			nb.Spec.Target = pol.Spec.TargetSpec.DeepCopy()
 			if err := r.Patch(ctx, &nb, client.MergeFrom(orig)); err != nil {
 				return err
 			}
@@ -205,18 +215,36 @@ func (r *PolicyReconciler) syncNodeObjects(ctx context.Context, pol *rpiv1.Bootl
 		if nb.Spec.PolicyName != pol.Name || want[nb.Name] {
 			continue
 		}
-		if err := r.release(ctx, nb); err != nil {
-			return err
-		}
-		if err := r.Delete(ctx, nb); client.IgnoreNotFound(err) != nil {
+		if err := r.unmanage(ctx, nb); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// policyExists reports whether a BootloaderPolicy of that name exists, so a node
+// left claimed by a policy that was removed without its finalizer can be adopted.
+func (r *PolicyReconciler) policyExists(ctx context.Context, name string) bool {
+	var p rpiv1.BootloaderPolicy
+	err := r.Get(ctx, types.NamespacedName{Name: name}, &p)
+	return err == nil && p.DeletionTimestamp.IsZero()
+}
+
+// unmanage returns a node to service and to the Unmanaged state: no policy, no
+// target, no approvals. The object stays, so the node stays visible.
+func (r *PolicyReconciler) unmanage(ctx context.Context, nb *rpiv1.NodeBootloader) error {
+	if err := r.release(ctx, nb); err != nil {
+		return err
+	}
+	orig := nb.DeepCopy()
+	nb.Spec = rpiv1.NodeBootloaderSpec{}
+	delete(nb.Annotations, AnnotationCordoned)
+	delete(nb.Annotations, AnnotationDrainedHash)
+	return r.Patch(ctx, nb, client.MergeFrom(orig))
+}
+
 func nodeState(nb *rpiv1.NodeBootloader, ready bool) plan.Node {
-	hash := nb.Spec.Target.Hash()
+	hash := nb.Spec.TargetHash()
 	n := plan.Node{
 		Name: nb.Name, Ready: ready,
 		Hash: hash, StatusHash: nb.Status.TargetHash, Phase: nb.Status.Phase, Message: nb.Status.Message,
@@ -243,7 +271,7 @@ func nodeReady(n *corev1.Node) bool {
 // execute performs one planner action. Ordering inside each action is
 // deliberate: cordon before approving, drain before authorising a reboot.
 func (r *PolicyReconciler) execute(ctx context.Context, pol *rpiv1.BootloaderPolicy, nb *rpiv1.NodeBootloader, a plan.Action) error {
-	hash := nb.Spec.Target.Hash()
+	hash := nb.Spec.TargetHash()
 	orig := nb.DeepCopy()
 	switch a.Kind {
 	case plan.Approve:
@@ -318,12 +346,9 @@ func (r *PolicyReconciler) finalize(ctx context.Context, pol *rpiv1.BootloaderPo
 		if nb.Spec.PolicyName != pol.Name {
 			continue
 		}
-		if err := r.release(ctx, nb); err != nil {
-			return err
-		}
-		// Deleting the object also withdraws any approval, so a staged update
-		// is not rebooted into by a later policy edit.
-		if err := r.Delete(ctx, nb); client.IgnoreNotFound(err) != nil {
+		// Back to Unmanaged: this uncordons what we cordoned and withdraws every
+		// approval, so a staged update is not rebooted into later.
+		if err := r.unmanage(ctx, nb); err != nil {
 			return err
 		}
 	}
@@ -362,30 +387,46 @@ func (r *PolicyReconciler) updateStatus(ctx context.Context, pol *rpiv1.Bootload
 	return r.Status().Patch(ctx, pol, client.MergeFrom(orig))
 }
 
+// allPolicyRequests asks every policy to reconcile.
+func (r *PolicyReconciler) allPolicyRequests(ctx context.Context) []reconcile.Request {
+	var list rpiv1.BootloaderPolicyList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for _, p := range list.Items {
+		reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: p.Name}})
+	}
+	return reqs
+}
+
+// policiesForNodeBootloader maps a NodeBootloader event to the policy that
+// manages it. A node nobody manages (an agent just created it) goes to every
+// policy, since any of them might select it.
+func (r *PolicyReconciler) policiesForNodeBootloader(ctx context.Context, o client.Object) []reconcile.Request {
+	nb, ok := o.(*rpiv1.NodeBootloader)
+	if !ok {
+		return nil
+	}
+	if nb.Spec.PolicyName == "" {
+		return r.allPolicyRequests(ctx)
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nb.Spec.PolicyName}}}
+}
+
+// policiesForNode maps a Node event (its labels decide which policy selects it)
+// to every policy.
+func (r *PolicyReconciler) policiesForNode(ctx context.Context, _ client.Object) []reconcile.Request {
+	return r.allPolicyRequests(ctx)
+}
+
 // SetupWithManager wires the watches.
 func (r *PolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	byPolicy := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
-		nb, ok := o.(*rpiv1.NodeBootloader)
-		if !ok || nb.Spec.PolicyName == "" {
-			return nil
-		}
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nb.Spec.PolicyName}}}
-	})
-	allPolicies := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
-		var list rpiv1.BootloaderPolicyList
-		if err := r.List(ctx, &list); err != nil {
-			return nil
-		}
-		reqs := make([]reconcile.Request, 0, len(list.Items))
-		for _, p := range list.Items {
-			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: p.Name}})
-		}
-		return reqs
-	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rpiv1.BootloaderPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&rpiv1.NodeBootloader{}, byPolicy).
-		Watches(&corev1.Node{}, allPolicies, builder.WithPredicates(predicate.LabelChangedPredicate{})).
+		Watches(&rpiv1.NodeBootloader{}, handler.EnqueueRequestsFromMapFunc(r.policiesForNodeBootloader)).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.policiesForNode),
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Named("bootloaderpolicy").
 		Complete(r)
 }

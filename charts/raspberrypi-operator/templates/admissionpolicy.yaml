@@ -14,7 +14,7 @@ spec:
     resourceRules:
       - apiGroups: ["rpi.conall.dev"]
         apiVersions: ["*"]
-        operations: ["UPDATE"]
+        operations: ["CREATE", "UPDATE"]
         resources: ["nodebootloaders", "nodebootloaders/status"]
   variables:
     - name: isAgent
@@ -28,8 +28,10 @@ spec:
   validations:
     - expression: "!variables.isAgent || (variables.nodeName != '' && object.metadata.name == variables.nodeName)"
       message: "an agent may only update the NodeBootloader of the node it runs on"
-    - expression: "!variables.isAgent || object.spec == oldObject.spec"
+    - expression: "!variables.isAgent || request.operation != 'UPDATE' || object.spec == oldObject.spec"
       message: "an agent may only change status, never spec"
+    - expression: "!variables.isAgent || request.operation != 'CREATE' || !has(object.spec) || (!has(object.spec.policyName) && !has(object.spec.target) && !has(object.spec.approvedHash) && !has(object.spec.rebootHash) && !has(object.spec.rebootAuthorizedAt))"
+      message: "an agent may only create an empty (Unmanaged) NodeBootloader"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

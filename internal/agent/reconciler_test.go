@@ -76,7 +76,7 @@ func newHarness(t *testing.T, chip rpiv1.Chip, target rpiv1.TargetSpec) *harness
 	}
 	nb := &rpiv1.NodeBootloader{
 		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-		Spec:       rpiv1.NodeBootloaderSpec{PolicyName: "p", Target: target},
+		Spec:       rpiv1.NodeBootloaderSpec{PolicyName: "p", Target: &target},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(nb).WithStatusSubresource(nb).Build()
 	size := 512 * 1024
@@ -98,6 +98,9 @@ func newHarness(t *testing.T, chip rpiv1.Chip, target rpiv1.TargetSpec) *harness
 		Now:      func() time.Time { return h.now },
 		Interval: time.Second,
 	}
+	// As in production, the agent evaluates a new object (it reports Pending)
+	// before the controller approves anything.
+	h.reconcile()
 	return h
 }
 
@@ -117,12 +120,20 @@ func (h *harness) update(f func(*rpiv1.NodeBootloader)) {
 	}
 }
 
+// reconcile runs one reconcile and fails the test if the node's phase moved in a
+// way the state machine (api/v1alpha1/phases.go) does not allow, so every agent
+// test also checks every transition it causes.
 func (h *harness) reconcile() rpiv1.NodeBootloader {
 	h.t.Helper()
+	from := h.get().Status.Phase
 	if _, err := h.r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: nodeName}}); err != nil {
 		h.t.Fatal(err)
 	}
-	return h.get()
+	nb := h.get()
+	if !rpiv1.CanTransition(from, nb.Status.Phase) {
+		h.t.Errorf("phase went %q -> %q, which is not in the state machine", from, nb.Status.Phase)
+	}
+	return nb
 }
 
 // bo builds a boot order from API names.
@@ -263,7 +274,7 @@ func TestBlocked(t *testing.T) {
 			h := newHarness(t, rpiv1.ChipBCM2711, tg)
 			c.mutate(&h.info, &tg)
 			h.update(func(nb *rpiv1.NodeBootloader) {
-				nb.Spec.Target = tg
+				nb.Spec.Target = &tg
 				nb.Spec.ApprovedHash = tg.Hash()
 				nb.Spec.RebootHash = tg.Hash()
 			})
@@ -314,7 +325,7 @@ func TestFailedAfterRebootIsSticky(t *testing.T) {
 	// A changed target clears the failure.
 	tg2 := target(rpiv1.ChipBCM2712, bo("nvme", "sd", "usb", "restart"))
 	h.update(func(nb *rpiv1.NodeBootloader) {
-		nb.Spec.Target = tg2
+		nb.Spec.Target = &tg2
 		nb.Spec.ApprovedHash = ""
 		nb.Spec.RebootHash = ""
 	})
@@ -341,7 +352,7 @@ func TestTargetChangeUnstages(t *testing.T) {
 		t.Fatal("expected staged")
 	}
 	tg2 := target(rpiv1.ChipBCM2712, bo("nvme", "sd", "usb", "restart"))
-	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.Target = tg2 }) // approval is now stale
+	h.update(func(nb *rpiv1.NodeBootloader) { nb.Spec.Target = &tg2 }) // approval is now stale
 	nb := h.reconcile()
 	if staged(h) || nb.Status.Phase != rpiv1.PhasePending || nb.Status.StagedHash != "" {
 		t.Fatalf("stale staged update survived a retarget: staged=%v phase=%s", staged(h), nb.Status.Phase)

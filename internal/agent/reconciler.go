@@ -8,12 +8,16 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	rpiv1 "github.com/conallob/raspberrypi-operator/api/v1alpha1"
 	"github.com/conallob/raspberrypi-operator/internal/eeprom"
@@ -22,7 +26,11 @@ import (
 
 // Reconciler drives the NodeBootloader for one node.
 type Reconciler struct {
-	Client   client.Client
+	Client client.Client
+	// Reader reads the Node (for the new object's owner reference) without a
+	// cache; the agent's cache is limited to its own NodeBootloader. Defaults
+	// to Client.
+	Reader   client.Reader
 	NodeName string
 	BootFS   string
 	Probe    func() (node.Info, error)
@@ -33,8 +41,10 @@ type Reconciler struct {
 	Interval time.Duration
 }
 
-// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders/status,verbs=get;update;patch
+// The agent's RBAC is config/rbac/bindings.yaml (and the chart's rbac.yaml):
+//   nodebootloaders: get, list, watch, create (its own node's object only, which
+//   the admission policy enforces); nodebootloaders/status: get, update, patch;
+//   nodes: get (to own the object it creates).
 
 // Reconcile implements reconcile.Reconciler.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -43,24 +53,78 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	var nb rpiv1.NodeBootloader
 	if err := r.Client.Get(ctx, req.NamespacedName, &nb); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// Deleted (or never created): put it back, so the node stays visible.
+			return ctrl.Result{}, r.ensureObject(ctx)
+		}
+		return ctrl.Result{}, err
 	}
 	logger := log.FromContext(ctx)
 	orig := nb.DeepCopy()
 
 	info, err := r.Probe()
 	if err != nil {
-		nb.Status.Phase = rpiv1.PhaseBlocked
+		nb.Status.TargetHash = nb.Spec.TargetHash()
+		if nb.Spec.Target == nil {
+			nb.Status.Phase = rpiv1.PhaseUnmanaged
+		} else {
+			nb.Status.Phase = rpiv1.PhaseBlocked
+		}
 		nb.Status.Message = err.Error()
-		nb.Status.TargetHash = nb.Spec.Target.Hash()
 		return r.finish(ctx, orig, &nb, nil)
 	}
 
 	reboot := r.evaluate(ctx, &nb, info)
 	if nb.Status.Phase != orig.Status.Phase {
 		logger.Info("phase changed", "from", orig.Status.Phase, "to", nb.Status.Phase, "message", nb.Status.Message)
+		if !rpiv1.CanTransition(orig.Status.Phase, nb.Status.Phase) {
+			// A bug in the state machine, not something to wedge a node over.
+			logger.Error(nil, "phase transition is not in the state machine",
+				"from", orig.Status.Phase, "to", nb.Status.Phase)
+		}
 	}
 	return r.finish(ctx, orig, &nb, reboot)
+}
+
+// ensureObject creates this node's NodeBootloader, empty, if it does not exist:
+// that is what makes the node visible before any policy selects it. Nothing is
+// created on a board the operator does not support (an arm64 server, say).
+func (r *Reconciler) ensureObject(ctx context.Context) error {
+	logger := log.FromContext(ctx)
+	if _, err := r.Probe(); err != nil {
+		logger.Info("not creating a NodeBootloader: this node cannot be managed", "reason", err.Error())
+		return nil
+	}
+	nb := &rpiv1.NodeBootloader{ObjectMeta: metav1.ObjectMeta{Name: r.NodeName}}
+	// Owned by the Node, so the object goes when the node does.
+	reader := r.Reader
+	if reader == nil {
+		reader = r.Client
+	}
+	var n corev1.Node
+	if err := reader.Get(ctx, client.ObjectKey{Name: r.NodeName}, &n); err != nil {
+		logger.Info("creating the NodeBootloader without an owner reference", "reason", err.Error())
+	} else if err := controllerutil.SetOwnerReference(&n, nb, r.Client.Scheme()); err != nil {
+		return err
+	}
+	if err := r.Client.Create(ctx, nb); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	logger.Info("created the NodeBootloader for this node; it is Unmanaged until a policy selects it")
+	return nil
+}
+
+// Bootstrap creates the node's NodeBootloader at startup, retrying until the API
+// server accepts it. It is a manager Runnable: without it nothing would ever
+// trigger a reconcile for an object that does not exist yet.
+func (r *Reconciler) Bootstrap(ctx context.Context) error {
+	return wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		if err := r.ensureObject(ctx); err != nil {
+			log.FromContext(ctx).Error(err, "creating the NodeBootloader; will retry")
+			return false, nil
+		}
+		return true, nil
+	})
 }
 
 // finish persists status and only then performs the reboot, so a reboot is
@@ -95,8 +159,8 @@ func (r *Reconciler) block(nb *rpiv1.NodeBootloader, format string, args ...any)
 // evaluate updates nb.Status for the current probe, stages an update if one is
 // approved, and returns a reboot function if the node should reboot now.
 func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, info node.Info) func() error {
-	target := &nb.Spec.Target
-	hash := target.Hash()
+	target := nb.Spec.Target
+	hash := nb.Spec.TargetHash()
 	st := &nb.Status
 
 	st.Model, st.Chip, st.BuildTimestamp = info.Model, info.Chip, info.BuildTimestamp
@@ -106,6 +170,22 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 		if v, ok := eeprom.ParseConfig(info.Config).Get(eeprom.KeyBootOrder); ok {
 			st.BootOrder = describeBootOrder(v)
 		}
+	}
+
+	// No policy selects this node: report what is there and do nothing. The only
+	// thing cleaned up is an update this agent staged for a policy that has since
+	// let go of the node; a file somebody else staged is never touched.
+	if target == nil {
+		if st.StagedHash != "" {
+			_ = node.Unstage(r.BootFS)
+		}
+		st.StagedHash, st.RebootingFromBootID, st.FailedHash = "", "", ""
+		st.Phase = rpiv1.PhaseUnmanaged
+		st.Message = "no BootloaderPolicy selects this node; observing only"
+		if info.ConfigErr != nil {
+			st.Message += " (the running bootloader config cannot be read: " + info.ConfigErr.Error() + ")"
+		}
+		return nil
 	}
 	// Anything left from a previous target is not this target's problem.
 	if st.StagedHash != "" && st.StagedHash != hash {
@@ -345,8 +425,12 @@ func (r *Reconciler) stage(ctx context.Context, nb *rpiv1.NodeBootloader, info n
 	return ""
 }
 
-// SetupWithManager registers the reconciler for this node's object only.
+// SetupWithManager registers the reconciler for this node's object only, and
+// the startup step that creates that object.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.Add(manager.RunnableFunc(r.Bootstrap)); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rpiv1.NodeBootloader{}).
 		Named("nodebootloader-agent").

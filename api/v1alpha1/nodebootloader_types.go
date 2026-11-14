@@ -4,11 +4,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Phase is where a node is in the update.
-// +kubebuilder:validation:Enum=UpToDate;Pending;Blocked;Staged;Rebooting;Failed
+// Phase is where a node is in the update. The allowed transitions between
+// phases are in AllowedTransitions (phases.go) and docs/design.md.
+// +kubebuilder:validation:Enum=Unmanaged;UpToDate;Pending;Blocked;Staged;Rebooting;Failed
 type Phase string
 
 const (
+	// PhaseUnmanaged: no BootloaderPolicy selects the node. The agent only
+	// reports what it observes; it never stages an update or reboots the node.
+	PhaseUnmanaged Phase = "Unmanaged"
 	// PhaseUpToDate: the running bootloader and config match the target.
 	PhaseUpToDate Phase = "UpToDate"
 	// PhasePending: the node differs from the target and awaits approval.
@@ -39,11 +43,15 @@ const (
 
 // NodeBootloaderSpec is written by the controller.
 type NodeBootloaderSpec struct {
-	// PolicyName is the BootloaderPolicy that owns this object.
-	PolicyName string `json:"policyName"`
+	// PolicyName is the BootloaderPolicy that manages this node. Empty while
+	// the node is unmanaged.
+	// +optional
+	PolicyName string `json:"policyName,omitempty"`
 
-	// Target is a copy of the owning policy's target.
-	Target TargetSpec `json:"target"`
+	// Target is a copy of the managing policy's target. Unset while the node is
+	// unmanaged.
+	// +optional
+	Target *TargetSpec `json:"target,omitempty"`
 
 	// ApprovedHash is the target hash the controller has cleared the agent to
 	// stage. The agent stages nothing unless it equals the hash of Target.
@@ -60,6 +68,14 @@ type NodeBootloaderSpec struct {
 	// from here.
 	// +optional
 	RebootAuthorizedAt *metav1.Time `json:"rebootAuthorizedAt,omitempty"`
+}
+
+// TargetHash is the hash of the node's target, or "" while it is unmanaged.
+func (s NodeBootloaderSpec) TargetHash() string {
+	if s.Target == nil {
+		return ""
+	}
+	return s.Target.Hash()
 }
 
 // NodeBootloaderStatus is written by the node agent.
@@ -116,8 +132,11 @@ type NodeBootloaderStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // NodeBootloader is the per-node working object shared by the controller and
-// the node agent. Its name is the node name. The controller owns spec and the
-// agent owns status; users normally only read it.
+// the node agent. Its name is the node name. The agent creates it when it starts
+// on a Raspberry Pi, so every Pi node is visible whether or not a policy selects
+// it. The controller owns spec (it fills it in when a policy selects the node,
+// and clears it when none does) and the agent owns status; users normally only
+// read it.
 type NodeBootloader struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -87,11 +87,25 @@ func TestAgentPolicyBehaviour(t *testing.T) {
 		}
 		return out.Value()
 	}
-	allowed := func(user string, extra map[string]any, objName string, newSpec, oldSpec string) bool {
+	type req struct {
+		op, user string
+		extra    map[string]any
+		name     string
+		spec     map[string]any // nil: the object has no spec at all
+		oldSpec  map[string]any
+	}
+	allowed := func(r req) bool {
+		object := map[string]any{"metadata": map[string]any{"name": r.name}}
+		if r.spec != nil {
+			object["spec"] = r.spec
+		}
 		act := map[string]any{
-			"request":   map[string]any{"userInfo": map[string]any{"username": user, "extra": extra}},
-			"object":    map[string]any{"metadata": map[string]any{"name": objName}, "spec": map[string]any{"v": newSpec}},
-			"oldObject": map[string]any{"spec": map[string]any{"v": oldSpec}},
+			"request":   map[string]any{"operation": r.op, "userInfo": map[string]any{"username": r.user, "extra": r.extra}},
+			"object":    object,
+			"oldObject": nil, // a CREATE has none
+		}
+		if r.op == "UPDATE" {
+			act["oldObject"] = map[string]any{"spec": r.oldSpec}
 		}
 		vars := map[string]any{}
 		act["variables"] = vars
@@ -105,24 +119,41 @@ func TestAgentPolicyBehaviour(t *testing.T) {
 		}
 		return true
 	}
-	const agent = "system:serviceaccount:raspberrypi-operator-system:raspberrypi-operator-agent"
+	const (
+		agent   = "system:serviceaccount:raspberrypi-operator-system:raspberrypi-operator-agent"
+		manager = "system:serviceaccount:raspberrypi-operator-system:raspberrypi-operator-manager"
+	)
 	node := func(n string) map[string]any {
 		return map[string]any{"authentication.kubernetes.io/node-name": []any{n}}
 	}
+	none := map[string]any{}
+	a, b := map[string]any{"v": "a"}, map[string]any{"v": "b"}
 	for _, c := range []struct {
 		name  string
 		allow bool
-		got   bool
+		r     req
 	}{
-		{"agent updates its own node's status", true, allowed(agent, node("pi-1"), "pi-1", "a", "a")},
-		{"agent updates another node's object", false, allowed(agent, node("pi-1"), "pi-2", "a", "a")},
-		{"agent without a node claim is denied", false, allowed(agent, map[string]any{}, "pi-1", "a", "a")},
-		{"agent changes spec", false, allowed(agent, node("pi-1"), "pi-1", "b", "a")},
-		{"the controller is not restricted", true, allowed("system:serviceaccount:raspberrypi-operator-system:raspberrypi-operator-manager", map[string]any{}, "pi-2", "b", "a")},
-		{"a human admin is not restricted", true, allowed("alice", map[string]any{}, "pi-2", "b", "a")},
+		// UPDATE
+		{"agent updates its own node's status", true, req{"UPDATE", agent, node("pi-1"), "pi-1", a, a}},
+		{"agent updates another node's object", false, req{"UPDATE", agent, node("pi-1"), "pi-2", a, a}},
+		{"agent without a node claim is denied", false, req{"UPDATE", agent, none, "pi-1", a, a}},
+		{"agent changes spec", false, req{"UPDATE", agent, node("pi-1"), "pi-1", b, a}},
+		{"the controller is not restricted", true, req{"UPDATE", manager, none, "pi-2", b, a}},
+		{"a human admin is not restricted", true, req{"UPDATE", "alice", none, "pi-2", b, a}},
+		// CREATE: how an agent makes its node visible
+		{"agent creates its own node's empty object", true, req{"CREATE", agent, node("pi-1"), "pi-1", none, nil}},
+		{"agent creates its own node's object with no spec at all", true, req{"CREATE", agent, node("pi-1"), "pi-1", nil, nil}},
+		{"agent creates another node's object", false, req{"CREATE", agent, node("pi-1"), "pi-2", none, nil}},
+		{"agent creates without a node claim", false, req{"CREATE", agent, none, "pi-1", none, nil}},
+		{"agent creates an object that claims a policy", false, req{"CREATE", agent, node("pi-1"), "pi-1", map[string]any{"policyName": "pis"}, nil}},
+		{"agent creates an object with a target", false, req{"CREATE", agent, node("pi-1"), "pi-1", map[string]any{"target": map[string]any{}}, nil}},
+		{"agent creates an object that is already approved", false, req{"CREATE", agent, node("pi-1"), "pi-1", map[string]any{"approvedHash": "x"}, nil}},
+		{"agent creates an object cleared to reboot", false, req{"CREATE", agent, node("pi-1"), "pi-1", map[string]any{"rebootHash": "x"}, nil}},
+		{"the controller creates a managed object", true, req{"CREATE", manager, none, "pi-2", map[string]any{"policyName": "pis"}, nil}},
+		{"a human creates an object", true, req{"CREATE", "alice", none, "pi-2", map[string]any{"policyName": "pis"}, nil}},
 	} {
-		if c.got != c.allow {
-			t.Errorf("%s: allowed=%v, want %v", c.name, c.got, c.allow)
+		if got := allowed(c.r); got != c.allow {
+			t.Errorf("%s: allowed=%v, want %v", c.name, got, c.allow)
 		}
 	}
 }
