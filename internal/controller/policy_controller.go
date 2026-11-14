@@ -387,37 +387,46 @@ func (r *PolicyReconciler) updateStatus(ctx context.Context, pol *rpiv1.Bootload
 	return r.Status().Patch(ctx, pol, client.MergeFrom(orig))
 }
 
+// allPolicyRequests asks every policy to reconcile.
+func (r *PolicyReconciler) allPolicyRequests(ctx context.Context) []reconcile.Request {
+	var list rpiv1.BootloaderPolicyList
+	if err := r.List(ctx, &list); err != nil {
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(list.Items))
+	for _, p := range list.Items {
+		reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: p.Name}})
+	}
+	return reqs
+}
+
+// policiesForNodeBootloader maps a NodeBootloader event to the policy that
+// manages it. A node nobody manages (an agent just created it) goes to every
+// policy, since any of them might select it.
+func (r *PolicyReconciler) policiesForNodeBootloader(ctx context.Context, o client.Object) []reconcile.Request {
+	nb, ok := o.(*rpiv1.NodeBootloader)
+	if !ok {
+		return nil
+	}
+	if nb.Spec.PolicyName == "" {
+		return r.allPolicyRequests(ctx)
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nb.Spec.PolicyName}}}
+}
+
+// policiesForNode maps a Node event (its labels decide which policy selects it)
+// to every policy.
+func (r *PolicyReconciler) policiesForNode(ctx context.Context, _ client.Object) []reconcile.Request {
+	return r.allPolicyRequests(ctx)
+}
+
 // SetupWithManager wires the watches.
 func (r *PolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	allPolicies := func(ctx context.Context) []reconcile.Request {
-		var list rpiv1.BootloaderPolicyList
-		if err := r.List(ctx, &list); err != nil {
-			return nil
-		}
-		reqs := make([]reconcile.Request, 0, len(list.Items))
-		for _, p := range list.Items {
-			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: p.Name}})
-		}
-		return reqs
-	}
-	byPolicy := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-		nb, ok := o.(*rpiv1.NodeBootloader)
-		if !ok {
-			return nil
-		}
-		if nb.Spec.PolicyName == "" {
-			// A newly created, unmanaged node: any policy might select it.
-			return allPolicies(ctx)
-		}
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nb.Spec.PolicyName}}}
-	})
-	nodeEvents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
-		return allPolicies(ctx)
-	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rpiv1.BootloaderPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&rpiv1.NodeBootloader{}, byPolicy).
-		Watches(&corev1.Node{}, nodeEvents, builder.WithPredicates(predicate.LabelChangedPredicate{})).
+		Watches(&rpiv1.NodeBootloader{}, handler.EnqueueRequestsFromMapFunc(r.policiesForNodeBootloader)).
+		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.policiesForNode),
+			builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		Named("bootloaderpolicy").
 		Complete(r)
 }

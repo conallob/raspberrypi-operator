@@ -10,6 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	rpiv1 "github.com/conallob/raspberrypi-operator/api/v1alpha1"
 )
@@ -280,4 +282,11 @@ func TestStatusConditionsWhenComplete(t *testing.T) {
 	if !complete || st.UpToDate != 1 || st.Selected != 1 {
 		t.Fatalf("status = %+v", st)
 	}
+}
+
+func clientKey(name string) types.NamespacedName { return types.NamespacedName{Name: name} }
+
+// interceptorClient wraps the harness's fake client with failure injection.
+func interceptorClient(e *env, f interceptor.Funcs) client.Client {
+	return interceptor.NewClient(e.c.(client.WithWatch), f)
 }

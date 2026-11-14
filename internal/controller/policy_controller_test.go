@@ -21,8 +21,9 @@ import (
 )
 
 type fakeDrainer struct {
-	log       []string
-	failDrain bool
+	log          []string
+	failDrain    bool
+	failUncordon bool
 }
 
 func (f *fakeDrainer) Cordon(_ context.Context, n string) error {
@@ -31,6 +32,9 @@ func (f *fakeDrainer) Cordon(_ context.Context, n string) error {
 }
 func (f *fakeDrainer) Uncordon(_ context.Context, n string) error {
 	f.log = append(f.log, "uncordon:"+n)
+	if f.failUncordon {
+		return errors.New("api server unavailable")
+	}
 	return nil
 }
 func (f *fakeDrainer) Drain(_ context.Context, n string, _ time.Duration) error {
