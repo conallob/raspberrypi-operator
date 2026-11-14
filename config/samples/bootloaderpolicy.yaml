@@ -10,14 +10,14 @@
 # To move to a newer release: pick a file under firmware-27xx/default/, copy its
 # build_epoch from versions.txt, update the commit in the URL, and take the
 # sha256 of the file.
-apiVersion: rpi.conallob.dev/v1alpha1
+apiVersion: rpi.conall.dev/v1alpha1
 kind: BootloaderPolicy
 metadata:
   name: pis
 spec:
   nodeSelector:
     matchLabels:
-      rpi.conallob.dev/managed: "true"
+      rpi.conall.dev/managed: "true"
   firmware:
     images:
       - chip: bcm2711 # Pi 4, Pi 400, CM4

@@ -33,8 +33,8 @@ type Reconciler struct {
 	Interval time.Duration
 }
 
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=nodebootloaders,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=nodebootloaders/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders/status,verbs=get;update;patch
 
 // Reconcile implements reconcile.Reconciler.
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

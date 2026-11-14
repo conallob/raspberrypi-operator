@@ -31,12 +31,12 @@ import (
 const (
 	// Finalizer makes sure nodes we cordoned are returned to service when a
 	// policy is deleted.
-	Finalizer = "rpi.conallob.dev/uncordon"
+	Finalizer = "rpi.conall.dev/uncordon"
 	// AnnotationCordoned marks a NodeBootloader whose node this controller
 	// cordoned. A node cordoned by someone else is never uncordoned by us.
-	AnnotationCordoned = "rpi.conallob.dev/cordoned"
+	AnnotationCordoned = "rpi.conall.dev/cordoned"
 	// AnnotationDrainedHash records the target hash a node was drained for.
-	AnnotationDrainedHash = "rpi.conallob.dev/drained-hash"
+	AnnotationDrainedHash = "rpi.conall.dev/drained-hash"
 
 	requeueBusy = 15 * time.Second
 	requeueIdle = 5 * time.Minute
@@ -53,10 +53,10 @@ type PolicyReconciler struct {
 	Now      func() time.Time
 }
 
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=bootloaderpolicies,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=bootloaderpolicies/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=bootloaderpolicies/finalizers,verbs=update
-// +kubebuilder:rbac:groups=rpi.conallob.dev,resources=nodebootloaders,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=bootloaderpolicies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=rpi.conall.dev,resources=nodebootloaders,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create

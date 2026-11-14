@@ -22,13 +22,13 @@ Images are arm64-only, as every supported board is.
 ## How it works
 
 ```yaml
-apiVersion: rpi.conallob.dev/v1alpha1
+apiVersion: rpi.conall.dev/v1alpha1
 kind: BootloaderPolicy
 metadata:
   name: pis
 spec:
   nodeSelector:
-    matchLabels: {rpi.conallob.dev/managed: "true"}
+    matchLabels: {rpi.conall.dev/managed: "true"}
   firmware:
     images:                           # from github.com/raspberrypi/rpi-eeprom
       - {chip: bcm2711, buildTimestamp: 1793402435, url: "https://…/pieeprom-2026-10-30.bin", sha256: "…"}
@@ -103,7 +103,7 @@ CRD using the API server's own validation code (`api/v1alpha1/crd_test.go`).
 
 ```bash
 make install        # CRDs, controller, agent
-kubectl label node <name> rpi.conallob.dev/managed=true
+kubectl label node <name> rpi.conall.dev/managed=true
 kubectl apply -f config/samples/bootloaderpolicy.yaml   # pinned to the 2026-10-30 release
 kubectl get bootloaderpolicy,nodebootloader
 ```

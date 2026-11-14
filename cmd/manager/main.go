@@ -46,7 +46,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
-		LeaderElectionID:       "raspberrypi-operator.rpi.conallob.dev",
+		LeaderElectionID:       "raspberrypi-operator.rpi.conall.dev",
 		Metrics:                metricsServerOptions(metricsAddr),
 	})
 	if err != nil {
