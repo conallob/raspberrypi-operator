@@ -1,0 +1,71 @@
+# The manager's ClusterRole is generated from the kubebuilder RBAC markers; see
+# rbac-manager-role.yaml (written by hack/sync-chart.sh, do not edit).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "raspberrypi-operator.managerName" . }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "raspberrypi-operator.managerName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "raspberrypi-operator.managerName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# The agent only reads NodeBootloaders and writes their status. RBAC cannot
+# restrict it to its own node's object; the admission policy does that.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "raspberrypi-operator.agentName" . }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["rpi.conall.dev"]
+    resources: ["nodebootloaders"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rpi.conall.dev"]
+    resources: ["nodebootloaders/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "raspberrypi-operator.agentName" . }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "raspberrypi-operator.agentName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "raspberrypi-operator.agentName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Leader election.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "raspberrypi-operator.managerName" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "raspberrypi-operator.managerName" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "raspberrypi-operator.managerName" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "raspberrypi-operator.managerName" . }}
+    namespace: {{ .Release.Namespace }}

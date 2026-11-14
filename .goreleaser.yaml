@@ -10,6 +10,9 @@ before:
     # :latest. Attached to the release as install.yaml. Rendered outside dist/, which
     # goreleaser empties after before-hooks have run.
     - ./hack/release-manifests.sh {{ .Version }} .release/install.yaml
+    # The Helm chart, versioned like the release. The release workflow also
+    # pushes it to GHCR as an OCI chart.
+    - make chart-package CHART_VERSION={{ .Version }} CHART_OUT=.release
 
 # Raspberry Pis are arm64, so that is all there is to build. The container
 # image is built and pushed by .github/workflows/image.yml on the same tag.
@@ -58,6 +61,7 @@ checksum:
   algorithm: sha256
   extra_files:
     - glob: .release/install.yaml
+    - glob: .release/raspberrypi-operator-*.tgz
 
 snapshot:
   version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"
@@ -90,6 +94,7 @@ release:
   prerelease: auto
   extra_files:
     - glob: .release/install.yaml
+    - glob: .release/raspberrypi-operator-*.tgz
   header: |
     ## raspberrypi-operator {{ .Tag }}
 
@@ -97,6 +102,15 @@ release:
     > recover by hand first. See the limitations in `docs/design.md`.
   footer: |
     ## Install
+
+    With Helm:
+
+    ```bash
+    helm install raspberrypi-operator oci://ghcr.io/conallob/charts/raspberrypi-operator \
+      --version {{ .Version }} --namespace raspberrypi-operator-system --create-namespace
+    ```
+
+    Or with plain manifests:
 
     ```bash
     kubectl apply -f https://github.com/conallob/raspberrypi-operator/releases/download/{{ .Tag }}/install.yaml

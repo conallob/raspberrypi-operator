@@ -1,0 +1,69 @@
+# The agent runs on every selected (arm64) node and does nothing on a node that
+# has no NodeBootloader object or that is not a Raspberry Pi.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "raspberrypi-operator.agentName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels: {{- include "raspberrypi-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels: {{- include "raspberrypi-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+      {{- with .Values.agent.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "raspberrypi-operator.agentName" . }}
+      # hostPID: reboot(2) from a container PID namespace only signals that
+      # namespace's init instead of rebooting the machine.
+      hostPID: true
+      {{- with .Values.agent.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "raspberrypi-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/agent"]
+          args:
+            - --boot-fs=/host/boot/firmware
+            - --interval={{ .Values.agent.interval }}
+            {{- with .Values.agent.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          # Privileged: needs /sys/firmware/devicetree and /sys/bus/nvmem (masked
+          # in unprivileged containers), write access to the boot partition and
+          # CAP_SYS_BOOT.
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - {name: bootfs, mountPath: /host/boot/firmware}
+          resources: {{- toYaml .Values.agent.resources | nindent 12 }}
+      volumes:
+        - name: bootfs
+          hostPath:
+            path: {{ .Values.agent.bootFS.hostPath | quote }}
+            type: Directory

@@ -1,0 +1,11 @@
+{{- if .Values.bootloaderPolicy.create }}
+# A BootloaderPolicy declared from values, so the operator and what it manages
+# can be versioned and rolled out as one unit. Leave bootloaderPolicy.create
+# false to manage policies as separate manifests instead.
+apiVersion: rpi.conall.dev/v1alpha1
+kind: BootloaderPolicy
+metadata:
+  name: {{ required "bootloaderPolicy.name is required when bootloaderPolicy.create is true" .Values.bootloaderPolicy.name }}
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+spec: {{- required "bootloaderPolicy.spec is required when bootloaderPolicy.create is true" .Values.bootloaderPolicy.spec | toYaml | nindent 2 }}
+{{- end }}

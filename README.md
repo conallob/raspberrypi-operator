@@ -101,6 +101,16 @@ CRD using the API server's own validation code (`api/v1alpha1/crd_test.go`).
 
 ## Install
 
+With Helm ([values and options](charts/raspberrypi-operator/README.md)):
+
+```bash
+helm install raspberrypi-operator \
+  oci://ghcr.io/conallob/charts/raspberrypi-operator --version <version> \
+  --namespace raspberrypi-operator-system --create-namespace
+```
+
+Or with kustomize from a checkout:
+
 ```bash
 make install        # CRDs, controller, agent
 kubectl label node <name> rpi.conall.dev/managed=true
