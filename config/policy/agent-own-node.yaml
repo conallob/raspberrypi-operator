@@ -1,0 +1,49 @@
+# Ties each agent to its own node's NodeBootloader.
+#
+# RBAC can grant the agent "update nodebootloaders/status" but cannot say "only
+# the object named after your node", so without this a compromised node could
+# report any other node as UpToDate (or Failed). This policy rejects writes where
+# the object name differs from the node the agent's service account token is
+# bound to.
+#
+# It relies on the node name the API server records in a pod-bound service
+# account token (`authentication.kubernetes.io/node-name` in userInfo.extra),
+# which needs a Kubernetes version that populates it (recent releases do; verify
+# on yours). If the claim is absent the policy fails closed: agent writes are
+# denied and nodes will not report status. On an older cluster, switch the
+# binding's validationActions to [Warn, Audit] until you have upgraded.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: raspberrypi-operator-agent-own-node
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rpi.conallob.dev"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["nodebootloaders", "nodebootloaders/status"]
+  variables:
+    - name: isAgent
+      expression: >-
+        request.userInfo.username ==
+        'system:serviceaccount:raspberrypi-operator-system:raspberrypi-operator-agent'
+    - name: nodeName
+      expression: >-
+        'authentication.kubernetes.io/node-name' in request.userInfo.extra
+        ? request.userInfo.extra['authentication.kubernetes.io/node-name'][0]
+        : ''
+  validations:
+    - expression: "!variables.isAgent || (variables.nodeName != '' && object.metadata.name == variables.nodeName)"
+      message: "an agent may only update the NodeBootloader of the node it runs on"
+    - expression: "!variables.isAgent || object.spec == oldObject.spec"
+      message: "an agent may only change status, never spec"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: raspberrypi-operator-agent-own-node
+spec:
+  policyName: raspberrypi-operator-agent-own-node
+  validationActions: ["Deny"]

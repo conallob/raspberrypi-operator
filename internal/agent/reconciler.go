@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -103,7 +104,7 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 	st.BootOrder = ""
 	if info.ConfigErr == nil {
 		if v, ok := eeprom.ParseConfig(info.Config).Get(eeprom.KeyBootOrder); ok {
-			st.BootOrder = eeprom.Normalize(eeprom.KeyBootOrder, v)
+			st.BootOrder = describeBootOrder(v)
 		}
 	}
 	// Anything left from a previous target is not this target's problem.
@@ -197,20 +198,71 @@ func (r *Reconciler) evaluate(ctx context.Context, nb *rpiv1.NodeBootloader, inf
 	return nil
 }
 
-// desiredSettings flattens the target's config into key/value pairs.
+// typedKeys maps the typed config fields to their bootloader keys.
+func typedKeys(c *rpiv1.BootloaderConfig) map[string]*bool {
+	return map[string]*bool{
+		"BOOT_UART":               c.BootUART,
+		"WAKE_ON_GPIO":            c.WakeOnGPIO,
+		"POWER_OFF_ON_HALT":       c.PowerOffOnHalt,
+		"NET_INSTALL_AT_POWER_ON": c.NetInstallAtPowerOn,
+	}
+}
+
+// bootOrder converts the target's boot order, if any.
+func bootOrder(c *rpiv1.BootloaderConfig) (eeprom.BootOrder, bool, error) {
+	if len(c.BootOrder) == 0 {
+		return nil, false, nil
+	}
+	names := make([]string, len(c.BootOrder))
+	for i, s := range c.BootOrder {
+		names[i] = string(s)
+	}
+	o, err := eeprom.BootOrderFromNames(names)
+	return o, true, err
+}
+
+// describeBootOrder renders a running BOOT_ORDER value as boot source names,
+// falling back to the raw value if it uses a mode the operator doesn't know.
+func describeBootOrder(raw string) string {
+	o, err := eeprom.ParseBootOrder(raw)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return strings.Join(o.Names(), ",")
+}
+
+// desiredSettings flattens the target's config into bootloader key/values.
+// The CRD already rejects the conflicts checked here; they are re-checked
+// because the agent must not trust that the CRD schema it was installed with
+// is current.
 func desiredSettings(t *rpiv1.TargetSpec) (map[string]string, error) {
 	out := map[string]string{}
 	for k, v := range t.Config.Settings {
-		if k == eeprom.KeyBootOrder {
+		switch k {
+		case eeprom.KeyBootOrder:
 			return nil, fmt.Errorf("set BOOT_ORDER with config.bootOrder, not config.settings")
+		case "ENABLE_SELF_UPDATE":
+			return nil, fmt.Errorf("ENABLE_SELF_UPDATE cannot be managed: the update mechanism depends on it")
 		}
-		out[k] = v
+		out[k] = string(v)
 	}
-	if t.Config.BootOrder != "" {
-		o, err := eeprom.ParseBootOrder(t.Config.BootOrder)
-		if err != nil {
-			return nil, err
+	for k, b := range typedKeys(&t.Config) {
+		if b == nil {
+			continue
 		}
+		if _, dup := out[k]; dup {
+			return nil, fmt.Errorf("%s is set both by its typed field and in config.settings", k)
+		}
+		out[k] = "0"
+		if *b {
+			out[k] = "1"
+		}
+	}
+	o, ok, err := bootOrder(&t.Config)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		out[eeprom.KeyBootOrder] = o.Canonical()
 	}
 	return out, nil
@@ -226,12 +278,12 @@ func preflight(t *rpiv1.TargetSpec, img rpiv1.ImageSource, info node.Info, bootf
 		return fmt.Sprintf("target build %d is older than the running build %d; set safety.allowDowngrade to permit",
 			img.BuildTimestamp, info.BuildTimestamp)
 	}
-	if t.Config.BootOrder == "" {
-		return ""
-	}
-	o, err := eeprom.ParseBootOrder(t.Config.BootOrder)
+	o, ok, err := bootOrder(&t.Config)
 	if err != nil {
 		return err.Error()
+	}
+	if !ok {
+		return ""
 	}
 	if t.Safety.AllowUnsafeBootOrder {
 		// Still refuse an order that cannot boot anything at all.
