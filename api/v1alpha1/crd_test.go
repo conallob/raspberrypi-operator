@@ -141,12 +141,12 @@ func mutated(t *testing.T, f func(spec map[string]any)) map[string]any {
 }
 
 func TestCRDsAreAcceptable(t *testing.T) {
-	loadCRD(t, "rpi.conallob.dev_bootloaderpolicies.yaml")
-	loadCRD(t, "rpi.conallob.dev_nodebootloaders.yaml")
+	loadCRD(t, "rpi.conall.dev_bootloaderpolicies.yaml")
+	loadCRD(t, "rpi.conall.dev_nodebootloaders.yaml")
 }
 
 func TestSampleIsValid(t *testing.T) {
-	c := loadCRD(t, "rpi.conallob.dev_bootloaderpolicies.yaml")
+	c := loadCRD(t, "rpi.conall.dev_bootloaderpolicies.yaml")
 	if p := c.check(sample(t), nil); len(p) > 0 {
 		t.Fatalf("sample manifest rejected: %v", p)
 	}
@@ -166,7 +166,7 @@ func images(spec map[string]any) []any {
 }
 
 func TestInvalidManifestsAreRejected(t *testing.T) {
-	c := loadCRD(t, "rpi.conallob.dev_bootloaderpolicies.yaml")
+	c := loadCRD(t, "rpi.conall.dev_bootloaderpolicies.yaml")
 	cases := []struct {
 		name   string
 		mutate func(spec map[string]any)
@@ -222,7 +222,7 @@ func TestInvalidManifestsAreRejected(t *testing.T) {
 }
 
 func TestDowngradeIsRefusedOnUpdate(t *testing.T) {
-	c := loadCRD(t, "rpi.conallob.dev_bootloaderpolicies.yaml")
+	c := loadCRD(t, "rpi.conall.dev_bootloaderpolicies.yaml")
 	old := sample(t)
 	older := func(allow bool, chip string) map[string]any {
 		return mutated(t, func(s map[string]any) {
