@@ -1,7 +1,7 @@
-// Package v1alpha1 contains the API types for the rpi.conallob.dev group.
+// Package v1alpha1 contains the API types for the rpi.conall.dev group.
 //
 // +kubebuilder:object:generate=true
-// +groupName=rpi.conallob.dev
+// +groupName=rpi.conall.dev
 package v1alpha1
 
 import (
@@ -11,7 +11,7 @@ import (
 
 var (
 	// GroupVersion is the group/version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "rpi.conallob.dev", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "rpi.conall.dev", Version: "v1alpha1"}
 
 	// SchemeBuilder registers the types with a runtime.Scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
