@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: bootloaderpolicies.rpi.conallob.dev
+  name: bootloaderpolicies.rpi.conall.dev
 spec:
-  group: rpi.conallob.dev
+  group: rpi.conall.dev
   names:
     kind: BootloaderPolicy
     listKind: BootloaderPolicyList

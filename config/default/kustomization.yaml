@@ -1,8 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../crd/rpi.conallob.dev_bootloaderpolicies.yaml
-  - ../crd/rpi.conallob.dev_nodebootloaders.yaml
+  - ../crd/rpi.conall.dev_bootloaderpolicies.yaml
+  - ../crd/rpi.conall.dev_nodebootloaders.yaml
   - ../manager/manager.yaml
   - ../rbac/service_account.yaml
   - ../rbac/role.yaml

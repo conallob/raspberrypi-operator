@@ -20,10 +20,10 @@ kind: ClusterRole
 metadata:
   name: raspberrypi-operator-agent
 rules:
-  - apiGroups: ["rpi.conallob.dev"]
+  - apiGroups: ["rpi.conall.dev"]
     resources: ["nodebootloaders"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: ["rpi.conallob.dev"]
+  - apiGroups: ["rpi.conall.dev"]
     resources: ["nodebootloaders/status"]
     verbs: ["get", "update", "patch"]
 ---
