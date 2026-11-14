@@ -1,0 +1,71 @@
+# Default values for raspberrypi-operator. Types are enforced by
+# values.schema.json, so a typo or a wrong type fails `helm install`.
+
+image:
+  repository: ghcr.io/conallob/raspberrypi-operator
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+crds:
+  # Install the CRDs with the chart. They are templates (not crds/), so they are
+  # upgraded with the release, and annotated helm.sh/resource-policy: keep so an
+  # uninstall never deletes your BootloaderPolicies. Set false if you manage the
+  # CRDs separately (e.g. kubectl apply -k config/crd, or a GitOps tool).
+  install: true
+
+manager:
+  # More than one replica only gives failover: leader election runs one.
+  replicas: 2
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  # The image is arm64-only, so the manager must run on an arm64 node.
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  tolerations: []
+  affinity: {}
+  extraArgs: []
+  podAnnotations: {}
+
+agent:
+  # How often each node re-checks its bootloader state.
+  interval: 30s
+  bootFS:
+    # Where the host mounts its boot partition. The agent writes the update here
+    # and the bootloader reads it from the same place on the next boot.
+    hostPath: /boot/firmware
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  # Run on every node, tainted or not; the agent does nothing on a node that no
+  # BootloaderPolicy selects.
+  tolerations:
+    - operator: Exists
+  priorityClassName: system-node-critical
+  extraArgs: []
+  podAnnotations: {}
+
+# Ties each agent to its own node's NodeBootloader (a ValidatingAdmissionPolicy).
+# Needs Kubernetes 1.30+ and a pod-bound service account token that carries the
+# node name; without it the policy denies agent writes. On an older cluster set
+# validationActions to [Warn, Audit] until you have upgraded.
+admissionPolicy:
+  enabled: true
+  failurePolicy: Fail
+  validationActions: [Deny]
+
+# Optionally declare a BootloaderPolicy here so the operator and what it manages
+# roll out as one unit. See config/samples/bootloaderpolicy.yaml in the repository,
+# or ci/policy-values.yaml, for a complete spec.
+bootloaderPolicy:
+  create: false
+  name: ""
+  spec: {}

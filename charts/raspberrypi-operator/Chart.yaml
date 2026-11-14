@@ -1,0 +1,20 @@
+apiVersion: v2
+name: raspberrypi-operator
+description: Manage the bootloader EEPROM (firmware and BOOT_ORDER) of Raspberry Pi 4/CM4 and Pi 5/CM5 nodes.
+type: application
+# Released charts are packaged with --version and --app-version set from the git
+# tag (see `make chart-package`); these are the values for a source checkout.
+version: 0.0.0-dev
+appVersion: latest
+kubeVersion: ">=1.29.0-0" # CRD CEL validation rules are GA in 1.29
+home: https://github.com/conallob/raspberrypi-operator
+sources:
+  - https://github.com/conallob/raspberrypi-operator
+keywords:
+  - raspberry-pi
+  - eeprom
+  - bootloader
+  - operator
+maintainers:
+  - name: Conall O'Brien
+    url: https://github.com/conallob

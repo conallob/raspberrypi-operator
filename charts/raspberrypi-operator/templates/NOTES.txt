@@ -1,0 +1,21 @@
+raspberrypi-operator {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
+
+Nodes are only touched once a BootloaderPolicy selects them:
+{{- if .Values.bootloaderPolicy.create }}
+
+  A policy "{{ .Values.bootloaderPolicy.name }}" was created from your values.
+{{- else }}
+
+  kubectl label node <name> rpi.conall.dev/managed=true
+  kubectl apply -f config/samples/bootloaderpolicy.yaml   # from the repository
+{{- end }}
+
+  kubectl get bootloaderpolicies,nodebootloaders
+
+This is alpha software that has not been run on real hardware yet. Try it on a
+spare node you can recover by hand first.
+{{- if not .Values.admissionPolicy.enabled }}
+
+admissionPolicy.enabled is false: nothing stops an agent writing another node's
+status.
+{{- end }}

@@ -1,0 +1,42 @@
+{{- if .Values.admissionPolicy.enabled }}
+# Ties each agent to its own node's NodeBootloader: RBAC cannot say "only the
+# object named after your node", so a compromised node could otherwise report
+# any other node as UpToDate. Needs Kubernetes 1.30+ (ValidatingAdmissionPolicy)
+# and a pod-bound token that carries the node name; it fails closed without it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "raspberrypi-operator.fullname" . }}-agent-own-node
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ .Values.admissionPolicy.failurePolicy }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rpi.conall.dev"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["nodebootloaders", "nodebootloaders/status"]
+  variables:
+    - name: isAgent
+      expression: >-
+        request.userInfo.username == {{ include "raspberrypi-operator.agentUser" . | squote }}
+    - name: nodeName
+      expression: >-
+        'authentication.kubernetes.io/node-name' in request.userInfo.extra
+        ? request.userInfo.extra['authentication.kubernetes.io/node-name'][0]
+        : ''
+  validations:
+    - expression: "!variables.isAgent || (variables.nodeName != '' && object.metadata.name == variables.nodeName)"
+      message: "an agent may only update the NodeBootloader of the node it runs on"
+    - expression: "!variables.isAgent || object.spec == oldObject.spec"
+      message: "an agent may only change status, never spec"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "raspberrypi-operator.fullname" . }}-agent-own-node
+  labels: {{- include "raspberrypi-operator.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "raspberrypi-operator.fullname" . }}-agent-own-node
+  validationActions: {{- toYaml .Values.admissionPolicy.validationActions | nindent 4 }}
+{{- end }}

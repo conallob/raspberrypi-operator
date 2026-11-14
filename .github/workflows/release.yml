@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write # create the release and upload its assets
+  packages: write # push the Helm chart to GHCR
 
 concurrency:
   group: release-${{ github.ref }}
@@ -33,3 +34,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # GoReleaser has already packaged the chart into .release/ and attached it
+      # to the release; this also publishes it as an OCI chart.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the Helm chart to GHCR
+        run: make chart-push CHART_VERSION="${GITHUB_REF_NAME#v}" CHART_OUT=.release

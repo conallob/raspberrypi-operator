@@ -61,8 +61,8 @@ install: ## Install CRDs, controller and agent into the current cluster.
 	kubectl apply -k config/default
 
 .PHONY: verify-generated
-verify-generated: generate manifests
-	git diff --exit-code -- api config
+verify-generated: generate manifests chart-sync
+	git diff --exit-code -- api config charts
 
 # GoReleaser itself can need a newer Go than the module targets; the go command
 # fetches whichever toolchain it asks for. The module is still built with the
@@ -76,3 +76,36 @@ release-check: ## Validate .goreleaser.yaml.
 .PHONY: release-snapshot
 release-snapshot: ## Build a full release into dist/ without tagging or publishing.
 	$(GORELEASER) release --snapshot --clean --skip=publish,announce
+
+# --- Helm chart (charts/raspberrypi-operator) ---------------------------------
+# The helm CLI is run with go run, like GoReleaser, so nothing needs installing.
+HELM        := go run helm.sh/helm/v3/cmd/helm@v3.22.1
+CHART       := charts/raspberrypi-operator
+CHART_OUT   ?= dist
+# For a released chart these come from the tag; a source checkout is 0.0.0-dev.
+CHART_VERSION ?= 0.0.0-dev
+
+.PHONY: chart-sync
+chart-sync: ## Regenerate the chart's CRDs and manager ClusterRole from config/.
+	./hack/sync-chart.sh
+
+.PHONY: chart-lint
+chart-lint:
+	$(HELM) lint $(CHART)
+	$(HELM) lint $(CHART) -f $(CHART)/ci/policy-values.yaml
+
+.PHONY: chart-test
+chart-test: chart-lint ## Render the chart in several configurations and check the output.
+	rm -rf $(CHART_OUT)/chart-render
+	HELM="$(HELM)" ./hack/render-chart.sh $(CHART_OUT)/chart-render
+	CHART_RENDER_DIR=$(abspath $(CHART_OUT)/chart-render) go test -count=1 ./internal/charttest/
+
+.PHONY: chart-package
+chart-package: ## Package the chart as CHART_VERSION into CHART_OUT.
+	$(HELM) package $(CHART) --version $(CHART_VERSION) --app-version $(CHART_VERSION) --destination $(CHART_OUT)
+
+CHART_REGISTRY ?= oci://ghcr.io/conallob/charts
+
+.PHONY: chart-push
+chart-push: ## Push the packaged chart to CHART_REGISTRY (log in first, e.g. docker login ghcr.io).
+	$(HELM) push $(CHART_OUT)/raspberrypi-operator-$(CHART_VERSION).tgz $(CHART_REGISTRY)

@@ -1,0 +1,5 @@
+.git
+*.swp
+*.tgz
+ci/
+README.md.gotmpl

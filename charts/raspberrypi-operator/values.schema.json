@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {"type": "object"},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "pullPolicy"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string"},
+        "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {"name": {"type": "string"}}
+      }
+    },
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "crds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"install": {"type": "boolean"}}
+    },
+    "manager": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {"type": "integer", "minimum": 1},
+        "resources": {"type": "object"},
+        "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "tolerations": {"type": "array", "items": {"type": "object"}},
+        "affinity": {"type": "object"},
+        "extraArgs": {"type": "array", "items": {"type": "string"}},
+        "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$"},
+        "bootFS": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hostPath"],
+          "properties": {"hostPath": {"type": "string", "pattern": "^/.+"}}
+        },
+        "resources": {"type": "object"},
+        "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "tolerations": {"type": "array", "items": {"type": "object"}},
+        "priorityClassName": {"type": "string"},
+        "extraArgs": {"type": "array", "items": {"type": "string"}},
+        "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "admissionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "failurePolicy": {"type": "string", "enum": ["Fail", "Ignore"]},
+        "validationActions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["Deny", "Warn", "Audit"]}
+        }
+      }
+    },
+    "bootloaderPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {"type": "boolean"},
+        "name": {"type": "string"},
+        "spec": {"type": "object"}
+      },
+      "if": {"properties": {"create": {"const": true}}, "required": ["create"]},
+      "then": {
+        "required": ["name", "spec"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "spec": {"type": "object", "minProperties": 1}
+        }
+      }
+    }
+  }
+}
