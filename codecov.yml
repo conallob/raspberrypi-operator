@@ -1,0 +1,24 @@
+# https://docs.codecov.com/docs/codecov-yaml
+coverage:
+  range: 60..90
+  status:
+    project:
+      default:
+        target: auto      # must not drop against the base commit...
+        threshold: 1%     # ...by more than this
+    patch:
+      default:
+        target: 80%       # new and changed lines
+        informational: false
+
+# Code that cannot or should not be unit-tested:
+ignore:
+  - "cmd/**"                      # thin main() wiring; exercised by running the binaries
+  - "**/zz_generated.*.go"        # controller-gen output
+  - "internal/node/reboot.go"     # a single reboot(2) call
+  - "internal/version/**"         # build-time linker variables
+  - "hack/**"
+
+comment:
+  layout: "condensed_header, diff, files"
+  require_changes: true
