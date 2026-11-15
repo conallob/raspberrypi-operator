@@ -108,6 +108,13 @@ kubectl apply -f config/samples/bootloaderpolicy.yaml   # pinned to the 2026-10-
 kubectl get bootloaderpolicy,nodebootloader
 ```
 
+Both CRDs are cluster-scoped, so `-n`/`-A` on that last command are no-ops
+either way. Run it *before* applying the sample (or on a cluster with no
+`BootloaderPolicy` at all) and it correctly prints `No resources found` --
+the controller creates a `NodeBootloader` only once a `BootloaderPolicy`
+exists and its `nodeSelector` matches at least one labeled node; that empty
+result isn't a sign anything's broken.
+
 The admission policy needs `admissionregistration.k8s.io/v1`
 ValidatingAdmissionPolicy (Kubernetes 1.30+) and a token that carries the node
 name; see the comments in `config/policy/agent-own-node.yaml`.
