@@ -51,6 +51,13 @@ spec:
             limits: {memory: 128Mi}
       volumes:
         - name: bootfs
+          # /boot/firmware is the Raspberry Pi OS/Debian convention
+          # (rpi-eeprom-update's own default). Not every distro uses it --
+          # Talos Linux mounts the same boot partition at /boot instead
+          # (BootMountPoint in siderolabs/talos/pkg/machinery/constants), so
+          # a Talos overlay needs this hostPath changed to /boot. The
+          # container-side mountPath/--boot-fs arg above is just an internal
+          # name and does not need to match the host path.
           hostPath:
             path: /boot/firmware
             type: Directory

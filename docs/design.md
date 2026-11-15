@@ -136,9 +136,18 @@ Pure function over node snapshots, covered by unit tests:
   `rpi-eeprom-update` treats lowering it specially (it needs
   `bootloader_allow_mfg_downgrade=1`). The operator does not model this yet.
 - Bootloaders older than build `1650968668` need a one-off manual update.
-- If `/boot/firmware` isn't a mount of the device the Pi boots from (some
-  distros, netboot), staged files won't be seen by the bootloader. The agent
-  detects an update that didn't apply (→ `Failed`) but can't predict it.
+- `/boot/firmware` (the agent's default `--boot-fs`) is the Raspberry Pi
+  OS/Debian convention, not a universal one. Talos Linux, for instance,
+  mounts the same boot partition at `/boot` (`BootMountPoint` in
+  `siderolabs/talos/pkg/machinery/constants`); other distros may differ
+  again. Getting this wrong on a distro the agent hasn't been pointed at
+  correctly means either the hostPath doesn't exist at all (the agent pod
+  fails to schedule — see README.md "Install") or, worse, it exists but
+  isn't a mount of the device the Pi actually boots from (some distros,
+  netboot): staged files are written but never seen by the bootloader. The
+  agent detects an update that didn't apply in the second case (→ `Failed`)
+  but can't predict either case, and can't detect the first at all (nothing
+  of the agent's runs if the pod never schedules).
 - `reboot(2)` is immediate; the node is drained but kubelet isn't stopped
   gracefully.
 - Firmware images are pinned explicitly; there is no channel resolution
