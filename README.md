@@ -112,8 +112,23 @@ The admission policy needs `admissionregistration.k8s.io/v1`
 ValidatingAdmissionPolicy (Kubernetes 1.30+) and a token that carries the node
 name; see the comments in `config/policy/agent-own-node.yaml`.
 
-The agent mounts the host's `/boot/firmware`. Distros that mount it elsewhere
-(or not at all) need the hostPath in `config/agent/daemonset.yaml` adjusted.
+The agent mounts the host's `/boot/firmware` — the Raspberry Pi OS/Debian
+convention, and `rpi-eeprom-update`'s own default. Not every distro uses that
+path: **Talos Linux** mounts the same boot partition (the one carrying
+`config.txt`/overlays/kernel/U-Boot, whatever the distro calls it) at `/boot`
+instead (`BootMountPoint` in
+[`siderolabs/talos/pkg/machinery/constants`](https://github.com/siderolabs/talos/blob/main/pkg/machinery/constants/constants.go)).
+Distros that mount it elsewhere (or not at all) need the hostPath in
+`config/agent/daemonset.yaml` changed to match — only the host-side
+`hostPath.path`; the container's own `mountPath`/`--boot-fs` arg is just an
+internal name and doesn't need to match it. Getting this wrong fails the
+agent pod at schedule time, not at reconcile time:
+
+```
+MountVolume.SetUp failed for volume "bootfs": hostPath type check failed,
+/boot/firmware is not a directory, unable to determine its type: path
+"/boot/firmware" does not exist
+```
 
 ## Choosing an image
 
