@@ -26,7 +26,7 @@ jobs:
           go-version-file: go.mod
       - name: Test before releasing
         run: make test
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: v2.20.2 # keep in step with GORELEASER in the Makefile
